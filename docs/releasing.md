@@ -30,7 +30,7 @@ continues to work because it does not use a traditional npm token.
 2. Run `pnpm install`, `pnpm check`, `pnpm test`, `pnpm build`, and
    `pnpm --filter @mmd2pptx/web e2e`.
 3. Merge the version PR and wait for the `main` CI and Pages workflows.
-4. Create and push a stable tag such as `v0.2.2` from the release commit on
+4. Create and push a stable tag such as `v1.2.3` from the release commit on
    `main`. Do not create the GitHub Release manually.
 5. The `Publish npm and release` workflow validates the tag, tests and packs the
    workspace, publishes Core before the CLI, and creates the GitHub Release only

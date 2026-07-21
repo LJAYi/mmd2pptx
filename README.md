@@ -10,7 +10,7 @@ labels, and connectors become native PowerPoint objects where possible, and the
 conversion result reports diagnostics instead of silently producing an empty
 slide.
 
-> **Status:** v0.2.2. The web app and CLI accept Mermaid source, while the core
+> **Status:** v0.2.3. The web app and CLI accept Mermaid source, while the core
 > SDK converts Mermaid-rendered SVG. The API and rendering coverage may still
 > evolve before 1.0.
 
@@ -115,7 +115,7 @@ installation-size details.
 
 ## Flowchart support
 
-| Feature | v0.2.2 behavior |
+| Feature | v0.2.3 behavior |
 | --- | --- |
 | Node shapes | Rectangles, rounded/stadium, ellipse, diamond, hexagon, parallelogram, trapezoid, cylinder |
 | Connectors | Editable straight segments with bends, solid/dashed/dotted styles, common start/end markers |

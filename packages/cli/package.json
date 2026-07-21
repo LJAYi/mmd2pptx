@@ -1,6 +1,6 @@
 {
   "name": "mmd2pptx",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "description": "Convert Mermaid source or SVG diagrams into editable PowerPoint presentations.",
   "type": "module",
   "types": "./dist/index.d.ts",

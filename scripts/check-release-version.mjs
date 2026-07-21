@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 
 const tag = process.argv[2] ?? process.env.GITHUB_REF_NAME;
 if (!tag || !/^v\d+\.\d+\.\d+$/.test(tag)) {
-  throw new Error(`Expected a stable release tag such as v0.2.2, received ${tag ?? "nothing"}.`);
+  throw new Error(`Expected a stable release tag such as v1.2.3, received ${tag ?? "nothing"}.`);
 }
 
 const expectedVersion = tag.slice(1);
