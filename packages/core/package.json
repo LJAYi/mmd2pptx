@@ -1,6 +1,6 @@
 {
   "name": "@mmd2pptx/core",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "description": "Browser and Node conversion engine for editable Mermaid PowerPoint exports.",
   "type": "module",
   "types": "./dist/index.d.ts",
