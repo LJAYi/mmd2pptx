@@ -22,3 +22,8 @@ material for a demo.
 
 Do not copy code from projects that do not grant an explicit open-source
 license. Describe external references and algorithms in the pull request.
+
+## Releases
+
+Maintainers must follow the [Trusted Publishing release process](docs/releasing.md).
+Do not add npm write tokens to GitHub Actions or repository settings.
