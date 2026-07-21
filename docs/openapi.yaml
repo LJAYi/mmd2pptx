@@ -1,0 +1,96 @@
+openapi: 3.1.0
+info:
+  title: mmd2pptx API
+  version: 1.0.0-draft
+  description: Convert Mermaid or SVG diagrams to editable PowerPoint files.
+servers:
+  - url: https://api.example.com
+paths:
+  /v1/convert:
+    post:
+      operationId: convertDiagram
+      summary: Convert a Mermaid or SVG diagram to PPTX
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ConvertRequest"
+      responses:
+        "200":
+          description: Editable PowerPoint presentation
+          headers:
+            X-mmd2pptx-Diagnostics:
+              description: Base64url-encoded compact diagnostic summary.
+              schema:
+                type: string
+          content:
+            application/vnd.openxmlformats-officedocument.presentationml.presentation:
+              schema:
+                type: string
+                contentEncoding: base64
+        "400":
+          description: Invalid Mermaid, SVG, or options
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "413":
+          description: Input or generated output exceeds service limits
+        "422":
+          description: Diagram is valid but cannot be converted safely
+        "429":
+          description: Rate limit exceeded
+components:
+  schemas:
+    ConvertRequest:
+      type: object
+      additionalProperties: false
+      required: [source, input]
+      properties:
+        source:
+          type: string
+          maxLength: 200000
+        input:
+          type: string
+          enum: [mermaid, svg]
+        layout:
+          type: string
+          enum: [wide, standard]
+          default: wide
+        backgroundColor:
+          type: string
+          pattern: "^#[0-9A-Fa-f]{6}$"
+          default: "#ffffff"
+        title:
+          type: string
+          maxLength: 200
+        fontFamily:
+          type: string
+          maxLength: 100
+    Problem:
+      type: object
+      required: [type, title, status]
+      properties:
+        type:
+          type: string
+          format: uri-reference
+        title:
+          type: string
+        status:
+          type: integer
+        detail:
+          type: string
+        diagnostics:
+          type: array
+          items:
+            type: object
+            required: [code, message, severity]
+            properties:
+              code:
+                type: string
+              message:
+                type: string
+              severity:
+                type: string
+                enum: [info, warning, error]
