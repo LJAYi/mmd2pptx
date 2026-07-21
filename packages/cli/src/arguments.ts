@@ -10,10 +10,10 @@ export interface CliOptions {
   outputPath?: string;
 }
 
-export const HELP_TEXT = `mmd2pptx — convert a Mermaid SVG into an editable PowerPoint file
+export const HELP_TEXT = `mmd2pptx — convert Mermaid into an editable PowerPoint file
 
 Usage:
-  mmd2pptx <diagram.svg> [options]
+  mmd2pptx <diagram.mmd|diagram.svg> [options]
 
 Options:
   -o, --output <file>       Output .pptx path (default: beside the input)
@@ -21,9 +21,8 @@ Options:
       --background <color>  Slide background color, for example #ffffff
   -h, --help                Show this help
 
-The CLI accepts SVG exported by Mermaid. Mermaid source rendering is available
-in the browser app and SDK; it is deliberately not a heavyweight CLI runtime
-dependency.
+Mermaid source (.mmd) is rendered in headless Chrome. Mermaid-generated SVG
+(.svg) uses the direct conversion path and does not launch a browser.
 `;
 
 export function parseCliArguments(argv: string[], cwd = process.cwd()): CliOptions {
@@ -69,10 +68,10 @@ export function parseCliArguments(argv: string[], cwd = process.cwd()): CliOptio
 
   if (!options.help) {
     if (positionals.length === 0) {
-      throw new Error("Missing input SVG file.");
+      throw new Error("Missing input file (.mmd or .svg).");
     }
     if (positionals.length > 1) {
-      throw new Error("Only one input SVG file can be converted at a time.");
+      throw new Error("Only one input file can be converted at a time.");
     }
   }
 

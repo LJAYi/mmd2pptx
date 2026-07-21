@@ -1,26 +1,46 @@
 {
   "name": "@mmd2pptx/core",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Browser and Node conversion engine for editable Mermaid PowerPoint exports.",
   "type": "module",
+  "types": "./dist/index.d.ts",
   "license": "Apache-2.0",
-  "private": true,
   "sideEffects": false,
+  "keywords": [
+    "mermaid",
+    "powerpoint",
+    "pptx",
+    "diagram",
+    "svg"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/LJAYi/mmd2pptx.git",
+    "directory": "packages/core"
+  },
+  "homepage": "https://github.com/LJAYi/mmd2pptx/tree/main/packages/core",
+  "bugs": {
+    "url": "https://github.com/LJAYi/mmd2pptx/issues"
+  },
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
-    }
+    },
+    "./package.json": "./package.json"
   },
   "files": [
     "dist",
     "README.md",
-    "LICENSE"
+    "LICENSE",
+    "NOTICE"
   ],
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\" && tsc -p tsconfig.json",
     "check": "tsc --noEmit -p tsconfig.json",
     "test": "vitest run",
+    "prepack": "pnpm build",
+    "prepublishOnly": "pnpm check && pnpm test",
     "clean": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\""
   },
   "dependencies": {
@@ -32,5 +52,11 @@
     "@types/node": "^22.15.0",
     "typescript": "^5.9.3",
     "vitest": "^3.2.4"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "publishConfig": {
+    "access": "public"
   }
 }

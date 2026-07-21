@@ -1,12 +1,14 @@
 {
   "name": "@mmd2pptx/web",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit -p tsconfig.json && vite build",
-    "check": "tsc --noEmit -p tsconfig.json",
+    "check": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.e2e.json",
+    "e2e": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.e2e.json && vite build && playwright test",
+    "e2e:install": "playwright install chromium",
     "preview": "vite preview"
   },
   "dependencies": {
@@ -14,6 +16,8 @@
     "mermaid": "^11.10.1"
   },
   "devDependencies": {
+    "@playwright/test": "^1.55.0",
+    "@types/node": "^22.15.0",
     "typescript": "^5.9.3",
     "vite": "^7.0.6"
   }

@@ -1,0 +1,42 @@
+<!-- mmd2pptx synthetic fixture -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 200">
+  <defs>
+    <marker id="fixture-pointEnd"><path d="M0,0 L10,5 L0,10 Z" /></marker>
+    <marker id="fixture-circleStart"><circle cx="5" cy="5" r="4" /></marker>
+    <marker id="fixture-diamondEnd"><path d="M0,5 L5,0 L10,5 L5,10 Z" /></marker>
+  </defs>
+  <g class="nodes">
+    <g class="node" id="n1" transform="translate(60,60)">
+      <rect x="-40" y="-20" width="80" height="40" />
+    </g>
+    <g class="node" id="n2" transform="translate(260,130)">
+      <rect x="-40" y="-20" width="80" height="40" />
+    </g>
+    <g class="node" id="n3" transform="translate(340,60)">
+      <ellipse cx="0" cy="0" rx="35" ry="22" />
+    </g>
+  </g>
+  <g class="edgePaths">
+    <path id="edge-dash" class="flowchart-link edge-pattern-dashed"
+      d="M100,60 L170,60 L170,130 L220,130"
+      stroke="#223344" stroke-width="2" fill="none"
+      marker-end="url(#fixture-pointEnd)" />
+    <path id="edge-dot" class="flowchart-link edge-pattern-dotted"
+      d="M300,130 L320,130 L320,82"
+      stroke="#556677" stroke-width="1.5" fill="none"
+      marker-start="url(#fixture-circleStart)"
+      marker-end="url(#fixture-diamondEnd)" />
+  </g>
+  <g class="edgeLabels">
+    <g class="edgeLabel" transform="translate(135,50)">
+      <g class="label" transform="translate(-24,-9)">
+        <foreignObject width="48" height="18" style="font: 12px Arial; color: #223344">
+          <div xmlns="http://www.w3.org/1999/xhtml">e1</div>
+        </foreignObject>
+      </g>
+    </g>
+    <g class="edgeLabel" transform="translate(300,142)">
+      <text text-anchor="middle" style="font-family: Arial; font-size: 12px; fill: #556677">e2</text>
+    </g>
+  </g>
+</svg>
