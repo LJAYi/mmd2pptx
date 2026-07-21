@@ -1,4 +1,5 @@
 import JSZip from "jszip";
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 import {
@@ -29,6 +30,15 @@ const SIMPLE_FLOW = `
     <path id="L_A_B_0" class="flowchart-link" d="M150,90 L260,90" stroke="#202830" stroke-width="2" fill="none" />
   </g>
 </svg>`;
+
+const EDGE_FIDELITY = readFileSync(
+  new URL("./fixtures/edge-fidelity.svg", import.meta.url),
+  "utf8",
+);
+const NODE_SHAPES = readFileSync(
+  new URL("./fixtures/node-shapes-transforms.svg", import.meta.url),
+  "utf8",
+);
 
 describe("normalizeFontFamily", () => {
   it("keeps one safe PowerPoint typeface", () => {
@@ -104,6 +114,64 @@ describe("parseMermaidSvg", () => {
   });
 });
 
+describe("synthetic compatibility corpus", () => {
+  it("marks every standalone fixture as synthetic", () => {
+    expect(EDGE_FIDELITY).toContain("mmd2pptx synthetic fixture");
+    expect(NODE_SHAPES).toContain("mmd2pptx synthetic fixture");
+  });
+
+  it("preserves connector bends, dash patterns, markers, and editable labels", () => {
+    const result = parseMermaidSvg(EDGE_FIDELITY);
+    expect(result.diagnostics.filter(({ severity }) => severity === "error")).toEqual([]);
+    expect(result.summary).toMatchObject({ nodes: 3, edges: 2, editableObjects: 10 });
+    expect(result.data.edges[0]).toMatchObject({
+      dash: "dash",
+      endArrow: "triangle",
+      points: [
+        { x: 100, y: 60 },
+        { x: 170, y: 60 },
+        { x: 170, y: 130 },
+        { x: 220, y: 130 },
+      ],
+      label: { text: "e1" },
+    });
+    expect(result.data.edges[1]).toMatchObject({
+      dash: "dot",
+      startArrow: "oval",
+      endArrow: "diamond",
+      label: { text: "e2" },
+    });
+  });
+
+  it("maps common shapes and composes nested affine transforms", () => {
+    const result = parseMermaidSvg(NODE_SHAPES);
+    expect(result.data.nodes.map(({ kind }) => kind)).toEqual([
+      "roundRect",
+      "ellipse",
+      "diamond",
+      "hexagon",
+      "roundRect",
+      "parallelogram",
+      "trapezoid",
+      "cylinder",
+      "rect",
+      "rect",
+    ]);
+    expect(result.data.nodes.at(-2)?.bounds).toEqual({
+      x: 470,
+      y: 146,
+      width: 80,
+      height: 48,
+    });
+    expect(result.data.nodes.at(-1)?.bounds).toEqual({
+      x: 560,
+      y: 155,
+      width: 60,
+      height: 30,
+    });
+  });
+});
+
 describe("svgStringToPptxBuffer", () => {
   it("writes a non-empty package with well-formed slide XML and safe fonts", async () => {
     const result = await svgStringToPptxBuffer(SIMPLE_FLOW, { layout: "wide" });
@@ -116,5 +184,21 @@ describe("svgStringToPptxBuffer", () => {
     expect(slideXml).toContain("<p:sp>");
     expect(slideXml).toContain('typeface="Trebuchet MS"');
     expect(slideXml).not.toContain('typeface=""Trebuchet');
+  });
+
+  it("emits one native object per connector segment, label, and node", async () => {
+    const result = await svgStringToPptxBuffer(EDGE_FIDELITY);
+    expect(result.diagnostics.filter(({ severity }) => severity === "error")).toEqual([]);
+    expect(result.summary.editableObjects).toBe(10);
+
+    const zip = await JSZip.loadAsync(result.data);
+    const slideXml = await zip.file("ppt/slides/slide1.xml")?.async("string");
+    expect(slideXml).toBeTruthy();
+    expect(slideXml?.match(/<p:sp(?:\s|>)/g)).toHaveLength(10);
+    expect(slideXml).toContain(">e1</a:t>");
+    expect(slideXml).toContain(">e2</a:t>");
+    expect(slideXml).toContain('type="triangle"');
+    expect(slideXml).toContain('type="diamond"');
+    expect(slideXml).toContain('type="oval"');
   });
 });

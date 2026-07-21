@@ -39,8 +39,8 @@ describe("parseCliArguments", () => {
   });
 
   it.each([
-    { args: [], message: "Missing input SVG file" },
-    { args: ["one.svg", "two.svg"], message: "Only one input SVG" },
+    { args: [], message: "Missing input file" },
+    { args: ["one.svg", "two.svg"], message: "Only one input file" },
     { args: ["one.svg", "--wat"], message: "Unknown option" },
     { args: ["one.svg", "--layout", "square"], message: "Invalid layout" },
     { args: ["one.svg", "--output"], message: "Missing value" },

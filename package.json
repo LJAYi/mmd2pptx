@@ -1,6 +1,6 @@
 {
   "name": "mmd2pptx",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Convert Mermaid diagrams into editable PowerPoint presentations.",
   "homepage": "https://ljayi.github.io/mmd2pptx/",
   "repository": {
@@ -16,9 +16,10 @@
   ],
   "scripts": {
     "build": "pnpm -r build",
-    "check": "pnpm -r check",
+    "check": "pnpm fixtures:check && pnpm -r check",
     "test": "pnpm -r test",
     "dev": "pnpm --filter @mmd2pptx/web dev",
+    "fixtures:check": "node scripts/check-public-fixtures.mjs",
     "pages:build": "pnpm --filter @mmd2pptx/web build",
     "clean": "pnpm -r clean"
   },

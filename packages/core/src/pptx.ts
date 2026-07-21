@@ -10,7 +10,11 @@ import type {
   ConversionResult,
   ConversionSummary,
   DiagramIR,
+  DiagramArrowKind,
+  DiagramEdge,
+  DiagramLineDash,
   DiagramNodeKind,
+  DiagramText,
 } from "./types.js";
 
 const PPTX_MIME = "application/vnd.openxmlformats-officedocument.presentationml.presentation";
@@ -57,23 +61,43 @@ export async function diagramToPptxBuffer(
   const offsetY = (slideHeight - contentHeight) / 2;
 
   for (const edge of diagram.edges) {
-    const startX = offsetX + edge.start.x * scale;
-    const startY = offsetY + edge.start.y * scale;
-    const endX = offsetX + edge.end.x * scale;
-    const endY = offsetY + edge.end.y * scale;
-    slide.addShape(pptx.ShapeType.line, {
-      x: Math.min(startX, endX),
-      y: Math.min(startY, endY),
-      w: Math.max(Math.abs(endX - startX), 0.001),
-      h: Math.max(Math.abs(endY - startY), 0.001),
-      flipH: endX < startX,
-      flipV: endY < startY,
-      line: {
-        color: normalizePptxColor(edge.color) ?? "333333",
-        endArrowType: "triangle",
-        width: Math.max(edge.strokeWidth ?? 1.5, 0.5),
-      },
-    });
+    const points = edgePoints(edge);
+    for (let index = 0; index < points.length - 1; index += 1) {
+      const start = points[index];
+      const end = points[index + 1];
+      if (!start || !end) {
+        continue;
+      }
+      const startX = offsetX + start.x * scale;
+      const startY = offsetY + start.y * scale;
+      const endX = offsetX + end.x * scale;
+      const endY = offsetY + end.y * scale;
+      slide.addShape(pptx.ShapeType.line, {
+        x: Math.min(startX, endX),
+        y: Math.min(startY, endY),
+        w: Math.max(Math.abs(endX - startX), 0.001),
+        h: Math.max(Math.abs(endY - startY), 0.001),
+        flipH: endX < startX,
+        flipV: endY < startY,
+        line: {
+          color: normalizePptxColor(edge.color) ?? "333333",
+          dashType: pptxDash(edge.dash),
+          width: Math.max(edge.strokeWidth ?? 1.5, 0.5),
+          ...(index === 0 && edge.startArrow && edge.startArrow !== "none"
+            ? { beginArrowType: pptxArrow(edge.startArrow) }
+            : {}),
+          ...(index === points.length - 2 && edge.endArrow && edge.endArrow !== "none"
+            ? { endArrowType: pptxArrow(edge.endArrow) }
+            : {}),
+        },
+      });
+    }
+  }
+
+  for (const edge of diagram.edges) {
+    if (edge.label) {
+      addEditableText(slide, edge.label, options, scale, offsetX, offsetY);
+    }
   }
 
   for (const node of diagram.nodes) {
@@ -105,7 +129,7 @@ export async function diagramToPptxBuffer(
         breakLine: false,
         color: normalizePptxColor(node.text.color) ?? "202830",
         fontFace: normalizeFontFamily(options.fontFamily ?? node.text.fontFamily) ?? "Arial",
-        fontSize: Math.max(((node.text.fontSize ?? 16) * 72) / 96, 6),
+        fontSize: scaledFontSize(node.text, scale),
       });
     } else {
       slide.addShape(shape, { x, y, w, h, fill, line });
@@ -114,7 +138,7 @@ export async function diagramToPptxBuffer(
 
   const raw = await pptx.write({ outputType: "arraybuffer", compression: true });
   const data = toUint8Array(raw);
-  diagnostics.push(...await validatePowerPointXml(data));
+  diagnostics.push(...await validatePowerPointXml(data, summary.editableObjects));
   return { data, diagnostics, summary };
 }
 
@@ -155,7 +179,10 @@ export async function svgStringToPptxBuffer(
   };
 }
 
-async function validatePowerPointXml(data: Uint8Array): Promise<ConversionDiagnostic[]> {
+async function validatePowerPointXml(
+  data: Uint8Array,
+  expectedObjects: number,
+): Promise<ConversionDiagnostic[]> {
   try {
     const zip = await JSZip.loadAsync(data);
     const slides = Object.keys(zip.files).filter((name) => /^ppt\/slides\/slide\d+\.xml$/.test(name));
@@ -191,6 +218,14 @@ async function validatePowerPointXml(data: Uint8Array): Promise<ConversionDiagno
           severity: "error",
         }];
       }
+      const nativeObjects = xml.match(/<p:sp(?:\s|>)/g)?.length ?? 0;
+      if (nativeObjects < expectedObjects) {
+        return [{
+          code: "PPTX_OBJECT_COUNT_MISMATCH",
+          message: `${name} contains ${nativeObjects} editable objects; expected at least ${expectedObjects}.`,
+          severity: "error",
+        }];
+      }
     }
     return [];
   } catch (error) {
@@ -212,6 +247,12 @@ function shapeType(pptx: PptxGenJS, kind: DiagramNodeKind) {
       return pptx.ShapeType.diamond;
     case "hexagon":
       return pptx.ShapeType.hexagon;
+    case "parallelogram":
+      return pptx.ShapeType.parallelogram;
+    case "trapezoid":
+      return pptx.ShapeType.trapezoid;
+    case "cylinder":
+      return pptx.ShapeType.can;
     case "rect":
     default:
       return pptx.ShapeType.rect;
@@ -246,9 +287,49 @@ function isFiniteDiagram(diagram: DiagramIR): boolean {
 
 function summaryFor(diagram: DiagramIR): ConversionSummary {
   return {
-    editableObjects: diagram.nodes.length + diagram.edges.length,
+    editableObjects: diagram.nodes.length + diagram.edges.reduce((count, edge) =>
+      count + Math.max(1, edgePoints(edge).length - 1) + (edge.label ? 1 : 0), 0),
     edges: diagram.edges.length,
     fallbackObjects: 0,
     nodes: diagram.nodes.length,
   };
+}
+
+function edgePoints(edge: DiagramEdge) {
+  return edge.points && edge.points.length >= 2 ? edge.points : [edge.start, edge.end];
+}
+
+function pptxDash(dash: DiagramLineDash | undefined): "solid" | "dash" | "sysDot" {
+  return dash === "dot" ? "sysDot" : dash === "dash" ? "dash" : "solid";
+}
+
+function pptxArrow(arrow: DiagramArrowKind): "none" | "arrow" | "diamond" | "oval" | "triangle" {
+  return arrow;
+}
+
+function addEditableText(
+  slide: PptxGenJS.Slide,
+  text: DiagramText,
+  options: ConversionOptions,
+  scale: number,
+  offsetX: number,
+  offsetY: number,
+): void {
+  slide.addText(text.text, {
+    x: offsetX + text.bounds.x * scale,
+    y: offsetY + text.bounds.y * scale,
+    w: Math.max(text.bounds.width * scale, 0.08),
+    h: Math.max(text.bounds.height * scale, 0.08),
+    align: "center",
+    valign: "middle",
+    fit: "shrink",
+    margin: 0,
+    color: normalizePptxColor(text.color) ?? "202830",
+    fontFace: normalizeFontFamily(options.fontFamily ?? text.fontFamily) ?? "Arial",
+    fontSize: scaledFontSize(text, scale),
+  });
+}
+
+function scaledFontSize(text: DiagramText, scale: number): number {
+  return Math.max((text.fontSize ?? 16) * scale * 72, 6);
 }

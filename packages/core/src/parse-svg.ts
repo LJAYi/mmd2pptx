@@ -5,8 +5,10 @@ import type {
   Bounds,
   ConversionDiagnostic,
   ConversionResult,
+  DiagramArrowKind,
   DiagramEdge,
   DiagramIR,
+  DiagramLineDash,
   DiagramNode,
   DiagramNodeKind,
   DiagramText,
@@ -21,6 +23,15 @@ type SvgElementLike = Element & {
 interface ViewBox extends Bounds {
   minX: number;
   minY: number;
+}
+
+interface AffineMatrix {
+  a: number;
+  b: number;
+  c: number;
+  d: number;
+  e: number;
+  f: number;
 }
 
 export function parseMermaidSvg(svg: string): ConversionResult<DiagramIR> {
@@ -81,7 +92,7 @@ function parseSvgRoot(root: SvgElementLike): ConversionResult<DiagramIR> {
     data: diagram,
     diagnostics,
     summary: {
-      editableObjects: nodes.length + edges.length,
+      editableObjects: editableObjectCount(nodes, edges),
       edges: edges.length,
       fallbackObjects: 0,
       nodes: nodes.length,
@@ -117,8 +128,8 @@ function parseNodes(
 
     // Start at the selected outline so Mermaid v11 shape- and wrapper-level
     // transforms are composed together with the ancestor node transform.
-    const translation = accumulatedTranslation(shape);
-    const geometry = shapeGeometry(shape, translation, viewBox);
+    const transform = accumulatedTransform(shape);
+    const geometry = shapeGeometry(shape, transform, viewBox);
     if (!geometry) {
       const elementId = group.getAttribute("id");
       diagnostics.push({
@@ -160,8 +171,8 @@ function parseEdges(
       continue;
     }
 
-    const points = pathEndpoints(path.getAttribute("d"));
-    if (!points) {
+    const localPoints = pathPoints(path.getAttribute("d"));
+    if (localPoints.length < 2) {
       const elementId = path.getAttribute("id");
       diagnostics.push({
         code: "EDGE_PATH_UNSUPPORTED",
@@ -172,18 +183,76 @@ function parseEdges(
       continue;
     }
 
+    const transform = accumulatedTransform(path);
+    const points = dedupePoints(localPoints.map((point) =>
+      normalizePoint(applyMatrix(transform, point), viewBox)));
+    if (points.length < 2) {
+      continue;
+    }
+
     const style = readShapeStyle(path);
+    const dash = edgeDash(path);
+    const startArrow = markerArrow(path, "start");
+    const endArrow = markerArrow(path, "end");
     const id = path.getAttribute("id") ?? `edge-${edges.length + 1}`;
+    const start = points[0];
+    const end = points.at(-1);
+    if (!start || !end) {
+      continue;
+    }
     edges.push({
       color: style.stroke ?? "333333",
-      end: normalizePoint(points.end, viewBox),
+      end,
       id,
-      start: normalizePoint(points.start, viewBox),
+      points,
+      start,
+      ...(dash !== "solid" ? { dash } : {}),
+      ...(startArrow !== "none" ? { startArrow } : {}),
+      ...(endArrow !== "none" ? { endArrow } : {}),
       ...(style.strokeWidth !== undefined ? { strokeWidth: style.strokeWidth } : {}),
     });
   }
 
+  attachEdgeLabels(root, edges, viewBox);
   return edges;
+}
+
+function attachEdgeLabels(
+  root: SvgElementLike,
+  edges: DiagramEdge[],
+  viewBox: ViewBox,
+): void {
+  const labelGroups = Array.from(root.getElementsByTagName("g"))
+    .filter((group) => hasClass(group, "edgeLabel") && !ancestorHasClass(group, "edgeLabel"));
+
+  for (const group of labelGroups) {
+    const groupElement = group as unknown as SvgElementLike;
+    const source = groupElement.getElementsByTagName("foreignObject")[0]
+      ?? groupElement.getElementsByTagName("text")[0];
+    if (!source) {
+      continue;
+    }
+
+    const bounds = textElementBounds(source, viewBox);
+    if (!bounds) {
+      continue;
+    }
+    const label = readTextElement(source, bounds);
+    if (!label) {
+      continue;
+    }
+
+    const center = {
+      x: bounds.x + bounds.width / 2,
+      y: bounds.y + bounds.height / 2,
+    };
+    const edge = edges
+      .filter((candidate) => !candidate.label)
+      .sort((left, right) => distanceToEdge(center, left) - distanceToEdge(center, right))[0];
+    if (edge) {
+      edge.label = label;
+    }
+  }
 }
 
 function firstShape(group: SvgElementLike): Element | undefined {
@@ -210,12 +279,12 @@ function firstShape(group: SvgElementLike): Element | undefined {
 
 function shapeGeometry(
   shape: Element,
-  translation: Point,
+  transform: AffineMatrix,
   viewBox: ViewBox,
 ): { bounds: Bounds; kind: DiagramNodeKind } | undefined {
   const tag = shape.tagName.toLowerCase();
   let bounds: Bounds | undefined;
-  let kind: DiagramNodeKind = "rect";
+  let kind: DiagramNodeKind = semanticNodeKind(shape) ?? "rect";
 
   if (tag === "rect") {
     const x = numberAttribute(shape, "x") ?? 0;
@@ -224,7 +293,9 @@ function shapeGeometry(
     const height = numberAttribute(shape, "height");
     if (width !== undefined && height !== undefined) {
       bounds = { x, y, width, height };
-      kind = (numberAttribute(shape, "rx") ?? 0) > 0 ? "roundRect" : "rect";
+      if (!semanticNodeKind(shape)) {
+        kind = (numberAttribute(shape, "rx") ?? 0) > 0 ? "roundRect" : "rect";
+      }
     }
   } else if (tag === "circle") {
     const cx = numberAttribute(shape, "cx") ?? 0;
@@ -232,7 +303,7 @@ function shapeGeometry(
     const radius = numberAttribute(shape, "r");
     if (radius !== undefined) {
       bounds = { x: cx - radius, y: cy - radius, width: radius * 2, height: radius * 2 };
-      kind = "ellipse";
+      kind = semanticNodeKind(shape) ?? "ellipse";
     }
   } else if (tag === "ellipse") {
     const cx = numberAttribute(shape, "cx") ?? 0;
@@ -241,28 +312,31 @@ function shapeGeometry(
     const ry = numberAttribute(shape, "ry");
     if (rx !== undefined && ry !== undefined) {
       bounds = { x: cx - rx, y: cy - ry, width: rx * 2, height: ry * 2 };
-      kind = "ellipse";
+      kind = semanticNodeKind(shape) ?? "ellipse";
     }
   } else if (tag === "polygon") {
     const points = parsePointList(shape.getAttribute("points"));
     bounds = boundsForPoints(points);
-    kind = points.length === 4 ? "diamond" : "hexagon";
+    kind = semanticNodeKind(shape)
+      ?? (isDiamond(points) ? "diamond" : points.length === 6 ? "hexagon" : "parallelogram");
   } else if (tag === "path") {
-    const points = numericPairs(shape.getAttribute("d"));
+    const points = pathPoints(shape.getAttribute("d"));
     bounds = boundsForPoints(points);
-    kind = hasSelfOrAncestorClass(shape, "outer-path") ? "roundRect" : "rect";
+    kind = semanticNodeKind(shape)
+      ?? (hasSelfOrAncestorClass(shape, "outer-path") ? "roundRect" : "rect");
   }
 
   if (!bounds || bounds.width <= 0 || bounds.height <= 0) {
     return undefined;
   }
 
+  const transformed = transformBounds(bounds, transform);
   return {
     bounds: {
-      x: bounds.x + translation.x - viewBox.minX,
-      y: bounds.y + translation.y - viewBox.minY,
-      width: bounds.width,
-      height: bounds.height,
+      x: transformed.x - viewBox.minX,
+      y: transformed.y - viewBox.minY,
+      width: transformed.width,
+      height: transformed.height,
     },
     kind,
   };
@@ -276,6 +350,10 @@ function readNodeText(group: SvgElementLike, bounds: Bounds): DiagramText | unde
     return undefined;
   }
 
+  return readTextElement(source, bounds);
+}
+
+function readTextElement(source: Element, bounds: Bounds): DiagramText | undefined {
   const text = normalizeText(textWithBreaks(source));
   if (!text) {
     return undefined;
@@ -300,6 +378,33 @@ function readNodeText(group: SvgElementLike, bounds: Bounds): DiagramText | unde
   };
 }
 
+function textElementBounds(element: Element, viewBox: ViewBox): Bounds | undefined {
+  let x = numberAttribute(element, "x") ?? 0;
+  let y = numberAttribute(element, "y") ?? 0;
+  let width = numberAttribute(element, "width");
+  let height = numberAttribute(element, "height");
+  if ((width === undefined || height === undefined) && element.tagName.toLowerCase() === "text") {
+    const style = readStyle(element);
+    const fontSize = parseCssNumber(style.get("font-size")) ?? 16;
+    const lines = normalizeText(textWithBreaks(element)).split("\n");
+    width = Math.max(...lines.map((line) => line.length), 1) * fontSize * 0.6;
+    height = Math.max(lines.length, 1) * fontSize * 1.2;
+    const anchor = style.get("text-anchor") ?? element.getAttribute("text-anchor");
+    x -= anchor === "end" ? width : anchor === "middle" ? width / 2 : 0;
+    y -= height / 2;
+  }
+  if (width === undefined || height === undefined || width <= 0 || height <= 0) {
+    return undefined;
+  }
+  const bounds = transformBounds({ x, y, width, height }, accumulatedTransform(element));
+  return {
+    x: bounds.x - viewBox.minX,
+    y: bounds.y - viewBox.minY,
+    width: bounds.width,
+    height: bounds.height,
+  };
+}
+
 function readShapeStyle(element: Element): {
   fill?: string;
   stroke?: string;
@@ -318,7 +423,19 @@ function readShapeStyle(element: Element): {
 
 function readStyle(element: Element): Map<string, string> {
   const style = new Map<string, string>();
-  for (const name of ["fill", "stroke", "stroke-width", "font-family", "font-size", "color"]) {
+  const names = [
+    "fill",
+    "stroke",
+    "stroke-width",
+    "stroke-dasharray",
+    "marker-start",
+    "marker-end",
+    "font-family",
+    "font-size",
+    "text-anchor",
+    "color",
+  ];
+  for (const name of names) {
     const value = element.getAttribute(name);
     if (value) {
       style.set(name, stripCssPriority(value));
@@ -336,7 +453,7 @@ function readStyle(element: Element): Map<string, string> {
   try {
     const computed = element.ownerDocument?.defaultView?.getComputedStyle(element);
     if (computed) {
-      for (const name of ["fill", "stroke", "stroke-width", "font-family", "font-size", "color"]) {
+      for (const name of names) {
         if (!style.has(name)) {
           const value = computed.getPropertyValue(name);
           if (value) {
@@ -426,30 +543,169 @@ function readViewBox(root: Element): ViewBox | undefined {
   return undefined;
 }
 
-function accumulatedTranslation(element: Element): Point {
-  let x = 0;
-  let y = 0;
+function accumulatedTransform(element: Element): AffineMatrix {
+  const elements: Element[] = [];
   let current: Node | null = element;
-  while (current && current.nodeType === 1) {
-    const transform = (current as Element).getAttribute("transform") ?? "";
-    for (const match of transform.matchAll(/translate\(\s*(-?\d*\.?\d+)(?:[\s,]+(-?\d*\.?\d+))?\s*\)/g)) {
-      x += Number(match[1]);
-      y += Number(match[2] ?? 0);
-    }
+  while (current?.nodeType === 1) {
+    elements.push(current as Element);
     current = current.parentNode;
   }
-  return { x, y };
+
+  return elements.reverse().reduce(
+    (matrix, item) => multiplyMatrices(matrix, parseTransform(item.getAttribute("transform"))),
+    identityMatrix(),
+  );
 }
 
-function pathEndpoints(path: string | null): { start: Point; end: Point } | undefined {
-  const points = numericPairs(path);
-  const start = points[0];
-  const end = points.at(-1);
-  return start && end ? { start, end } : undefined;
+function parseTransform(value: string | null): AffineMatrix {
+  let matrix = identityMatrix();
+  for (const match of (value ?? "").matchAll(/([a-zA-Z]+)\s*\(([^)]*)\)/g)) {
+    const name = match[1]?.toLowerCase();
+    const values = numericValues(match[2] ?? "");
+    let next = identityMatrix();
+    if (name === "matrix" && values.length >= 6) {
+      next = {
+        a: values[0] ?? 1,
+        b: values[1] ?? 0,
+        c: values[2] ?? 0,
+        d: values[3] ?? 1,
+        e: values[4] ?? 0,
+        f: values[5] ?? 0,
+      };
+    } else if (name === "translate") {
+      next.e = values[0] ?? 0;
+      next.f = values[1] ?? 0;
+    } else if (name === "scale") {
+      next.a = values[0] ?? 1;
+      next.d = values[1] ?? values[0] ?? 1;
+    } else if (name === "rotate") {
+      const radians = ((values[0] ?? 0) * Math.PI) / 180;
+      const cosine = Math.cos(radians);
+      const sine = Math.sin(radians);
+      const cx = values[1] ?? 0;
+      const cy = values[2] ?? 0;
+      next = {
+        a: cosine,
+        b: sine,
+        c: -sine,
+        d: cosine,
+        e: cx - cosine * cx + sine * cy,
+        f: cy - sine * cx - cosine * cy,
+      };
+    } else if (name === "skewx") {
+      next.c = Math.tan(((values[0] ?? 0) * Math.PI) / 180);
+    } else if (name === "skewy") {
+      next.b = Math.tan(((values[0] ?? 0) * Math.PI) / 180);
+    }
+    matrix = multiplyMatrices(matrix, next);
+  }
+  return matrix;
+}
+
+function identityMatrix(): AffineMatrix {
+  return { a: 1, b: 0, c: 0, d: 1, e: 0, f: 0 };
+}
+
+function multiplyMatrices(left: AffineMatrix, right: AffineMatrix): AffineMatrix {
+  return {
+    a: left.a * right.a + left.c * right.b,
+    b: left.b * right.a + left.d * right.b,
+    c: left.a * right.c + left.c * right.d,
+    d: left.b * right.c + left.d * right.d,
+    e: left.a * right.e + left.c * right.f + left.e,
+    f: left.b * right.e + left.d * right.f + left.f,
+  };
+}
+
+function applyMatrix(matrix: AffineMatrix, point: Point): Point {
+  return {
+    x: matrix.a * point.x + matrix.c * point.y + matrix.e,
+    y: matrix.b * point.x + matrix.d * point.y + matrix.f,
+  };
+}
+
+function transformBounds(bounds: Bounds, matrix: AffineMatrix): Bounds {
+  return boundsForPoints([
+    applyMatrix(matrix, { x: bounds.x, y: bounds.y }),
+    applyMatrix(matrix, { x: bounds.x + bounds.width, y: bounds.y }),
+    applyMatrix(matrix, { x: bounds.x + bounds.width, y: bounds.y + bounds.height }),
+    applyMatrix(matrix, { x: bounds.x, y: bounds.y + bounds.height }),
+  ]) ?? bounds;
+}
+
+function pathPoints(path: string | null): Point[] {
+  const tokens = (path ?? "").match(/[a-zA-Z]|[-+]?(?:\d*\.\d+|\d+\.?)(?:e[-+]?\d+)?/gi) ?? [];
+  const parameterCounts: Record<string, number> = {
+    A: 7,
+    C: 6,
+    H: 1,
+    L: 2,
+    M: 2,
+    Q: 4,
+    S: 4,
+    T: 2,
+    V: 1,
+  };
+  const points: Point[] = [];
+  let command = "";
+  let index = 0;
+  let current: Point = { x: 0, y: 0 };
+  let subpathStart: Point = { x: 0, y: 0 };
+
+  while (index < tokens.length) {
+    const token = tokens[index];
+    if (token && /^[a-zA-Z]$/.test(token)) {
+      command = token;
+      index += 1;
+      if (command.toUpperCase() === "Z") {
+        current = { ...subpathStart };
+        points.push({ ...current });
+        command = "";
+        continue;
+      }
+    }
+    if (!command) {
+      break;
+    }
+
+    const upper = command.toUpperCase();
+    const count = parameterCounts[upper];
+    if (!count || index + count > tokens.length) {
+      break;
+    }
+    const values = tokens.slice(index, index + count).map(Number);
+    if (values.some((value) => !Number.isFinite(value))) {
+      break;
+    }
+    index += count;
+    const relative = command === command.toLowerCase();
+    const relativeX = (value: number) => value + (relative ? current.x : 0);
+    const relativeY = (value: number) => value + (relative ? current.y : 0);
+
+    if (upper === "H") {
+      current = { x: relativeX(values[0] ?? 0), y: current.y };
+    } else if (upper === "V") {
+      current = { x: current.x, y: relativeY(values[0] ?? 0) };
+    } else {
+      const coordinateIndex = upper === "A" ? 5 : count - 2;
+      current = {
+        x: relativeX(values[coordinateIndex] ?? 0),
+        y: relativeY(values[coordinateIndex + 1] ?? 0),
+      };
+    }
+
+    if (upper === "M") {
+      subpathStart = { ...current };
+      command = relative ? "l" : "L";
+    }
+    points.push({ ...current });
+  }
+
+  return dedupePoints(points);
 }
 
 function numericPairs(value: string | null): Point[] {
-  const values = (value ?? "").match(/-?\d*\.?\d+(?:e[-+]?\d+)?/gi)?.map(Number) ?? [];
+  const values = numericValues(value ?? "");
   const points: Point[] = [];
   for (let index = 0; index + 1 < values.length; index += 2) {
     const x = values[index];
@@ -461,8 +717,139 @@ function numericPairs(value: string | null): Point[] {
   return points;
 }
 
+function numericValues(value: string): number[] {
+  return value.match(/[-+]?(?:\d*\.\d+|\d+\.?)(?:e[-+]?\d+)?/gi)?.map(Number) ?? [];
+}
+
 function parsePointList(value: string | null): Point[] {
   return numericPairs(value);
+}
+
+function dedupePoints(points: Point[]): Point[] {
+  return points.filter((point, index) => {
+    const previous = points[index - 1];
+    return !previous || Math.abs(point.x - previous.x) > 0.0001 ||
+      Math.abs(point.y - previous.y) > 0.0001;
+  });
+}
+
+function edgeDash(element: Element): DiagramLineDash {
+  if (hasClass(element, "edge-pattern-dotted")) {
+    return "dot";
+  }
+  if (hasClass(element, "edge-pattern-dashed")) {
+    return "dash";
+  }
+  const dashArray = readStyle(element).get("stroke-dasharray");
+  if (!dashArray || dashArray === "none") {
+    return "solid";
+  }
+  const firstDash = numericValues(dashArray)[0] ?? 3;
+  const strokeWidth = parseCssNumber(readStyle(element).get("stroke-width")) ?? 1;
+  return firstDash <= strokeWidth * 2 ? "dot" : "dash";
+}
+
+function markerArrow(element: Element, end: "start" | "end"): DiagramArrowKind {
+  const marker = readStyle(element).get(`marker-${end}`)?.toLowerCase();
+  if (!marker || marker === "none") {
+    return "none";
+  }
+  if (marker.includes("circle")) {
+    return "oval";
+  }
+  if (marker.includes("diamond")) {
+    return "diamond";
+  }
+  if (marker.includes("barb") || marker.includes("arrow")) {
+    return "arrow";
+  }
+  if (marker.includes("cross")) {
+    return "none";
+  }
+  return "triangle";
+}
+
+function semanticNodeKind(element: Element): DiagramNodeKind | undefined {
+  let current: Node | null = element;
+  while (current?.nodeType === 1) {
+    const classes = ((current as Element).getAttribute("class") ?? "").toLowerCase();
+    if (/\b(cylinder|database|cyl)\b/.test(classes)) {
+      return "cylinder";
+    }
+    if (/\b(parallelogram|lean-left|lean-right|lean-l|lean-r)\b/.test(classes)) {
+      return "parallelogram";
+    }
+    if (/\b(trapezoid|trapezoidal|inv-trapezoid)\b/.test(classes)) {
+      return "trapezoid";
+    }
+    if (/\b(diamond|rhombus|question|choice)\b/.test(classes)) {
+      return "diamond";
+    }
+    if (/\b(hexagon|hex)\b/.test(classes)) {
+      return "hexagon";
+    }
+    if (/\b(stadium|rounded|outer-path)\b/.test(classes)) {
+      return "roundRect";
+    }
+    current = current.parentNode;
+  }
+  return undefined;
+}
+
+function isDiamond(points: Point[]): boolean {
+  if (points.length !== 4) {
+    return false;
+  }
+  const bounds = boundsForPoints(points);
+  if (!bounds) {
+    return false;
+  }
+  const center = { x: bounds.x + bounds.width / 2, y: bounds.y + bounds.height / 2 };
+  return points.every((point) =>
+    Math.abs(point.x - center.x) < 0.001 || Math.abs(point.y - center.y) < 0.001);
+}
+
+function ancestorHasClass(element: Element, token: string): boolean {
+  let current = element.parentNode;
+  while (current?.nodeType === 1) {
+    if (hasClass(current as Element, token)) {
+      return true;
+    }
+    current = current.parentNode;
+  }
+  return false;
+}
+
+function distanceToEdge(point: Point, edge: DiagramEdge): number {
+  const points = edge.points && edge.points.length >= 2
+    ? edge.points
+    : [edge.start, edge.end];
+  let distance = Number.POSITIVE_INFINITY;
+  for (let index = 0; index < points.length - 1; index += 1) {
+    const start = points[index];
+    const end = points[index + 1];
+    if (start && end) {
+      distance = Math.min(distance, distanceToSegment(point, start, end));
+    }
+  }
+  return distance;
+}
+
+function distanceToSegment(point: Point, start: Point, end: Point): number {
+  const dx = end.x - start.x;
+  const dy = end.y - start.y;
+  const lengthSquared = dx * dx + dy * dy;
+  const amount = lengthSquared === 0
+    ? 0
+    : Math.max(0, Math.min(1, ((point.x - start.x) * dx + (point.y - start.y) * dy) / lengthSquared));
+  return Math.hypot(point.x - (start.x + amount * dx), point.y - (start.y + amount * dy));
+}
+
+function editableObjectCount(nodes: DiagramNode[], edges: DiagramEdge[]): number {
+  return nodes.length + edges.reduce((count, edge) => {
+    const segments = Math.max(1, (edge.points?.length ?? 2) - 1);
+    return count + segments + (edge.label ? 1 : 0);
+  }, 0);
 }
 
 function boundsForPoints(points: Point[]): Bounds | undefined {

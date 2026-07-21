@@ -10,10 +10,9 @@ labels, and connectors become native PowerPoint objects where possible, and the
 conversion result reports diagnostics instead of silently producing an empty
 slide.
 
-> **Status:** early MVP. Flowchart SVG conversion is the first supported path;
-> expect the API and rendering coverage to evolve before 1.0.
-> Workspace packages are intentionally marked private until package-level
-> license/readme artifacts and the public API are frozen for the first release.
+> **Status:** v0.2.0. The web app and CLI accept Mermaid source, while the core
+> SDK converts Mermaid-rendered SVG. The API and rendering coverage may still
+> evolve before 1.0.
 
 ## Project surfaces
 
@@ -21,7 +20,7 @@ slide.
 | --- | --- |
 | Web app | Paste Mermaid, preview it, and download a PPTX locally in the browser |
 | `@mmd2pptx/core` | Browser and Node SDK for SVG parsing and PowerPoint generation |
-| `@mmd2pptx/cli` | Convert Mermaid-generated `.svg` files from scripts and CI |
+| `@mmd2pptx/cli` | Convert `.mmd` source or Mermaid-generated `.svg` from scripts and CI |
 | GitHub Pages | Hosts the static web app without receiving diagram source |
 
 The static app and SDK perform conversion locally. Diagram contents do not need
@@ -48,6 +47,12 @@ site such as `https://<owner>.github.io/mmd2pptx/` and a custom domain. Set
 `MMD2PPTX_BASE_PATH` only when an explicit absolute base is preferred.
 
 ## SDK
+
+Install the public core package:
+
+```bash
+npm install @mmd2pptx/core
+```
 
 The core package separates SVG parsing from PowerPoint generation so callers can
 render Mermaid with their preferred version and security settings:
@@ -90,20 +95,34 @@ await writeFile("diagram.pptx", result.data);
 
 ## CLI
 
-The MVP CLI accepts an SVG already rendered by Mermaid. Keeping Mermaid CLI out
-of the required dependency tree avoids downloading a browser runtime for users
-who only need SVG conversion.
+Install the command globally, then convert either Mermaid source or an existing
+SVG:
 
 ```bash
-pnpm --filter @mmd2pptx/cli build
-node packages/cli/dist/cli.js diagram.svg \
+npm install --global @mmd2pptx/cli
+mmd2pptx diagram.mmd --output diagram.pptx
+mmd2pptx diagram.svg \
   --output diagram.pptx \
   --layout wide \
   --background '#ffffff'
 ```
 
-Run `mmd2pptx --help` for all options. Direct `.mmd` input can be layered on by
-a caller or a future optional Mermaid CLI integration.
+Run `mmd2pptx --help` for all options. `.mmd` conversion launches headless
+Chrome through the package-local Mermaid CLI. `.svg` conversion stays on the
+direct path and does not launch a browser. See the
+[CLI package guide](packages/cli/README.md) for browser configuration and
+installation-size details.
+
+## Flowchart support
+
+| Feature | v0.2.0 behavior |
+| --- | --- |
+| Node shapes | Rectangles, rounded/stadium, ellipse, diamond, hexagon, parallelogram, trapezoid, cylinder |
+| Connectors | Editable straight segments with bends, solid/dashed/dotted styles, common start/end markers |
+| Edge labels | Editable text from SVG text or Mermaid HTML labels |
+| Transforms | Nested matrix, translate, scale, rotate, and skew |
+| Curves | Approximated as editable straight segments between path command endpoints |
+| Unsupported SVG | Reported through diagnostics; filters, arbitrary paths, clusters, and some CSS are not exact |
 
 ## HTTP API and GitHub Pages
 

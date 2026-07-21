@@ -1,3 +1,4 @@
+// mmd2pptx synthetic fixture: fictional public demo created from scratch.
 export const EXAMPLE_DIAGRAM = `flowchart LR
     REQUEST["Feature request<br/>goal · audience"]
     PLAN["Implementation plan<br/>scope · milestones"]

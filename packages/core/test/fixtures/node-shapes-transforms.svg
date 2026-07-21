@@ -1,0 +1,33 @@
+<!-- mmd2pptx synthetic fixture -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 620 240">
+  <g class="node" id="round" transform="translate(70,60)">
+    <rect x="-45" y="-24" width="90" height="48" rx="10" />
+  </g>
+  <g class="node" id="ellipse" transform="matrix(1 0 0 1 190 60)">
+    <ellipse cx="0" cy="0" rx="42" ry="25" />
+  </g>
+  <g class="node diamond" id="diamond" transform="translate(300,15)">
+    <polygon transform="translate(0,45)" points="0,-32 48,0 0,32 -48,0" />
+  </g>
+  <g class="node hexagon" id="hexagon" transform="translate(420,60)">
+    <polygon points="-45,-25 25,-25 45,0 25,25 -45,25 -65,0" />
+  </g>
+  <g class="node stadium" id="stadium" transform="translate(545,60)">
+    <g class="outer-path"><path d="M-48,-24 L48,-24 L48,24 L-48,24 Z" /></g>
+  </g>
+  <g class="node parallelogram" id="parallel" transform="translate(80,170)">
+    <polygon points="-40,-24 50,-24 40,24 -50,24" />
+  </g>
+  <g class="node trapezoid" id="trap" transform="translate(220,170)">
+    <polygon points="-35,-24 35,-24 50,24 -50,24" />
+  </g>
+  <g class="node cylinder" id="cylinder" transform="translate(360,170)">
+    <path d="M-42,-26 L42,-26 L42,26 L-42,26 Z" />
+  </g>
+  <g class="node" id="scaled" transform="translate(510,170)">
+    <g transform="scale(2,1.5)"><rect x="-20" y="-16" width="40" height="32" /></g>
+  </g>
+  <g class="node" id="rotated" transform="translate(590,170)">
+    <rect transform="rotate(90)" x="-15" y="-30" width="30" height="60" />
+  </g>
+</svg>

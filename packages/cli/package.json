@@ -1,10 +1,27 @@
 {
   "name": "@mmd2pptx/cli",
-  "version": "0.1.0",
-  "description": "Command-line interface for converting Mermaid SVG diagrams into editable PowerPoint presentations.",
+  "version": "0.2.0",
+  "description": "Convert Mermaid source or SVG diagrams into editable PowerPoint presentations.",
   "type": "module",
+  "types": "./dist/index.d.ts",
   "license": "Apache-2.0",
-  "private": true,
+  "sideEffects": false,
+  "keywords": [
+    "mermaid",
+    "powerpoint",
+    "pptx",
+    "diagram",
+    "cli"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/LJAYi/mmd2pptx.git",
+    "directory": "packages/cli"
+  },
+  "homepage": "https://github.com/LJAYi/mmd2pptx/tree/main/packages/cli",
+  "bugs": {
+    "url": "https://github.com/LJAYi/mmd2pptx/issues"
+  },
   "bin": {
     "mmd2pptx": "./dist/cli.js"
   },
@@ -12,21 +29,27 @@
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
-    }
+    },
+    "./package.json": "./package.json"
   },
   "files": [
     "dist",
     "README.md",
-    "LICENSE"
+    "LICENSE",
+    "NOTICE"
   ],
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\" && tsc -p tsconfig.build.json",
     "check": "pnpm --filter @mmd2pptx/core build && tsc --noEmit -p tsconfig.json",
     "test": "vitest run",
+    "prepack": "pnpm build",
+    "prepublishOnly": "pnpm check && pnpm test",
     "clean": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\""
   },
   "dependencies": {
-    "@mmd2pptx/core": "workspace:*"
+    "@mermaid-js/mermaid-cli": "^11.16.0",
+    "@mmd2pptx/core": "workspace:*",
+    "puppeteer": "^24.43.1"
   },
   "devDependencies": {
     "@types/node": "^22.15.0",
@@ -35,5 +58,8 @@
   },
   "engines": {
     "node": ">=20"
+  },
+  "publishConfig": {
+    "access": "public"
   }
 }

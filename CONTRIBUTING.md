@@ -15,5 +15,10 @@ pnpm build
 Please add a regression test for every conversion bug. A successful test must
 inspect generated PowerPoint content, not only check that a file was created.
 
+Public examples and test fixtures must follow the
+[public example policy](docs/public-example-policy.md). Create them from
+scratch, mark them as synthetic, and never adapt user-provided or confidential
+material for a demo.
+
 Do not copy code from projects that do not grant an explicit open-source
 license. Describe external references and algorithms in the pull request.

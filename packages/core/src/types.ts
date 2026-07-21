@@ -47,7 +47,19 @@ export interface DiagramText {
   text: string;
 }
 
-export type DiagramNodeKind = "rect" | "roundRect" | "ellipse" | "diamond" | "hexagon";
+export type DiagramNodeKind =
+  | "rect"
+  | "roundRect"
+  | "ellipse"
+  | "diamond"
+  | "hexagon"
+  | "parallelogram"
+  | "trapezoid"
+  | "cylinder";
+
+export type DiagramArrowKind = "none" | "arrow" | "triangle" | "diamond" | "oval";
+
+export type DiagramLineDash = "solid" | "dash" | "dot";
 
 export interface DiagramNode {
   bounds: Bounds;
@@ -61,10 +73,14 @@ export interface DiagramNode {
 
 export interface DiagramEdge {
   color?: string;
+  dash?: DiagramLineDash;
   end: Point;
+  endArrow?: DiagramArrowKind;
   id: string;
   label?: DiagramText;
+  points?: Point[];
   start: Point;
+  startArrow?: DiagramArrowKind;
   strokeWidth?: number;
 }
 
