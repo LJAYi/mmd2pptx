@@ -1,0 +1,176 @@
+name: Publish npm and release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+concurrency:
+  group: publish
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.release-version.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+
+      - name: Require a release commit from main
+        run: |
+          git fetch origin main
+          git merge-base --is-ancestor "$GITHUB_SHA" origin/main
+
+      - uses: pnpm/action-setup@b0f76dfb45f55f8421693e4803ac7bb65143bd34 # v6
+        with:
+          version: 10.14.0
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+          package-manager-cache: false
+
+      - name: Install dependencies without a browser download
+        env:
+          PUPPETEER_SKIP_DOWNLOAD: "true"
+        run: pnpm install --frozen-lockfile
+
+      - name: Install Playwright Chromium
+        run: pnpm --filter @mmd2pptx/web exec playwright install --with-deps chromium
+
+      - name: Verify tag and package versions
+        id: release-version
+        run: |
+          node scripts/check-release-version.mjs "$GITHUB_REF_NAME"
+          echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Require unpublished npm versions
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          for package in "@mmd2pptx/core" "mmd2pptx"; do
+            if npm view "$package@$version" version >/dev/null 2>&1; then
+              echo "::error::$package@$version is already published"
+              exit 1
+            fi
+          done
+
+      - name: Type-check and verify public fixtures
+        run: pnpm check
+
+      - name: Test
+        run: pnpm test
+
+      - name: Build
+        run: pnpm build
+
+      - name: Browser export E2E
+        run: pnpm --filter @mmd2pptx/web e2e
+
+      - name: Pack release artifacts
+        run: |
+          mkdir -p release
+          pnpm --filter @mmd2pptx/core pack --pack-destination release
+          pnpm --filter ./packages/cli pack --pack-destination release
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: npm-packages-${{ steps.release-version.outputs.version }}
+          path: release/*.tgz
+          if-no-files-found: error
+          overwrite: true
+          retention-days: 7
+
+  publish-core:
+    needs: validate
+    runs-on: ubuntu-latest
+    environment: npm
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+          package-manager-cache: false
+
+      - name: Use an OIDC-capable npm CLI
+        run: npm install --global npm@11.10.0
+
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: npm-packages-${{ needs.validate.outputs.version }}
+          path: release
+
+      - name: Publish Core with Trusted Publishing
+        run: npm publish "release/mmd2pptx-core-${{ needs.validate.outputs.version }}.tgz" --access public
+
+  publish-cli:
+    needs: [validate, publish-core]
+    runs-on: ubuntu-latest
+    environment: npm
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+          package-manager-cache: false
+
+      - name: Use an OIDC-capable npm CLI
+        run: npm install --global npm@11.10.0
+
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: npm-packages-${{ needs.validate.outputs.version }}
+          path: release
+
+      - name: Wait for Core registry propagation
+        run: |
+          for attempt in {1..24}; do
+            if npm view "@mmd2pptx/core@${{ needs.validate.outputs.version }}" version; then
+              exit 0
+            fi
+            sleep 5
+          done
+          exit 1
+
+      - name: Publish CLI with Trusted Publishing
+        run: npm publish "release/mmd2pptx-${{ needs.validate.outputs.version }}.tgz" --access public
+
+  release:
+    needs: [validate, publish-cli]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: npm-packages-${{ needs.validate.outputs.version }}
+          path: release
+
+      - name: Create GitHub Release after npm succeeds
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" release/*.tgz \
+              --repo "$GITHUB_REPOSITORY" \
+              --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" release/*.tgz \
+              --repo "$GITHUB_REPOSITORY" \
+              --verify-tag \
+              --target "$GITHUB_SHA" \
+              --title "mmd2pptx $GITHUB_REF_NAME" \
+              --generate-notes
+          fi
