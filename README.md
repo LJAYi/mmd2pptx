@@ -10,7 +10,7 @@ labels, and connectors become native PowerPoint objects where possible, and the
 conversion result reports diagnostics instead of silently producing an empty
 slide.
 
-> **Status:** v0.2.0. The web app and CLI accept Mermaid source, while the core
+> **Status:** v0.2.1. The web app and CLI accept Mermaid source, while the core
 > SDK converts Mermaid-rendered SVG. The API and rendering coverage may still
 > evolve before 1.0.
 
@@ -20,7 +20,7 @@ slide.
 | --- | --- |
 | Web app | Paste Mermaid, preview it, and download a PPTX locally in the browser |
 | `@mmd2pptx/core` | Browser and Node SDK for SVG parsing and PowerPoint generation |
-| `@mmd2pptx/cli` | Convert `.mmd` source or Mermaid-generated `.svg` from scripts and CI |
+| `mmd2pptx` | Main CLI for converting `.mmd` source or Mermaid-generated `.svg` |
 | GitHub Pages | Hosts the static web app without receiving diagram source |
 
 The static app and SDK perform conversion locally. Diagram contents do not need
@@ -99,7 +99,7 @@ Install the command globally, then convert either Mermaid source or an existing
 SVG:
 
 ```bash
-npm install --global @mmd2pptx/cli
+npm install --global mmd2pptx
 mmd2pptx diagram.mmd --output diagram.pptx
 mmd2pptx diagram.svg \
   --output diagram.pptx \
@@ -115,7 +115,7 @@ installation-size details.
 
 ## Flowchart support
 
-| Feature | v0.2.0 behavior |
+| Feature | v0.2.1 behavior |
 | --- | --- |
 | Node shapes | Rectangles, rounded/stadium, ellipse, diamond, hexagon, parallelogram, trapezoid, cylinder |
 | Connectors | Editable straight segments with bends, solid/dashed/dotted styles, common start/end markers |

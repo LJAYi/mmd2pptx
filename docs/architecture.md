@@ -17,7 +17,7 @@ leave the browser.
 ## Public surfaces
 
 - `@mmd2pptx/core`: browser and Node-compatible IR/PPTX primitives.
-- `@mmd2pptx/cli`: command-line Mermaid source or SVG conversion; Mermaid
+- `mmd2pptx`: command-line Mermaid source or SVG conversion; Mermaid
   source is rendered in an isolated temporary directory before entering core.
 - `@mmd2pptx/web`: static GitHub Pages application.
 - HTTP API: a separately deployed, versioned service described by
