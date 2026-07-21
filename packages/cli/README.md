@@ -1,4 +1,4 @@
-# `@mmd2pptx/cli`
+# `mmd2pptx`
 
 Convert Mermaid source or Mermaid-generated SVG into an editable PowerPoint
 presentation.
@@ -6,7 +6,7 @@ presentation.
 ## Install
 
 ```bash
-npm install --global @mmd2pptx/cli
+npm install --global mmd2pptx
 ```
 
 The package publishes an ESM API and the `mmd2pptx` executable. It requires
