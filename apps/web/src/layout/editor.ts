@@ -978,6 +978,7 @@ export class SvgLayoutEditor {
     const selected = this.selectedKey
       ? this.nodeHandles.get(this.selectedKey)?.element.id
       : undefined;
+    const nodeOrder = [...this.nodeHandles.keys()];
     const state: LayoutEditorState = {
       canGroup: this.selectedKeys.size >= 2 && this.selectedNodeEntries().every(({ key }) =>
         !(this.sidecar.groups ?? []).some(({ children }) =>
@@ -996,7 +997,7 @@ export class SvgLayoutEditor {
         this.sidecar.nodes.some(({ mode }) => mode === "manual") ||
         this.sidecar.edges.length > 0 ||
         (this.sidecar.groups ?? []).some(({ id }) => id.startsWith("layout-group-")) ||
-        this.zOrder.some((key, index) => key !== [...this.nodeHandles.keys()][index]),
+        this.zOrder.some((key, index) => key !== nodeOrder[index]),
       hasSavedLayout: this.hasPersisted(),
       persistenceEnabled: this.persistenceEnabled,
       routingWarnings: [...this.routingWarnings],

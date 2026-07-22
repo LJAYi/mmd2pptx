@@ -355,8 +355,8 @@ function expandCanvas(diagram: DiagramIR, diagnostics: ConversionDiagnostic[]): 
       severity: "warning",
     });
   }
-  diagram.width = Math.max(diagram.width, ...points.map(({ x }) => x));
-  diagram.height = Math.max(diagram.height, ...points.map(({ y }) => y));
+  diagram.width = points.reduce((maximum, { x }) => Math.max(maximum, x), diagram.width);
+  diagram.height = points.reduce((maximum, { y }) => Math.max(maximum, y), diagram.height);
 }
 
 function cloneDiagram(diagram: DiagramIR): DiagramIR {

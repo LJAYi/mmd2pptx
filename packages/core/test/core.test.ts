@@ -490,7 +490,7 @@ describe("svgStringToPptxBuffer", () => {
     expect(slideXml).toContain("<a:cubicBezTo>");
     expect(slideXml).toContain("<a:quadBezTo>");
     expect(slideXml).toContain("<a:arcTo");
-    expect(slideXml).not.toContain("<a:close />");
+    expect(slideXml).not.toContain("<a:close/>");
     expect(slideXml?.match(/<a:prstDash val="dash"\/>/g)).toHaveLength(1);
     expect(slideXml?.match(/<a:tailEnd type="arrow"\/>/g)).toHaveLength(1);
   });

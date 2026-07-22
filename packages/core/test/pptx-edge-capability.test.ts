@@ -33,7 +33,7 @@ describe("PptxGenJS edge capability probe", () => {
     expect(xml).toContain('name="probe-quadratic-and-arc"');
     expect(xml).toContain('<a:quadBezTo>');
     expect(xml).toContain('<a:arcTo');
-    expect(xml).not.toContain("<a:close />");
+    expect(xml).not.toContain("<a:close/>");
   });
 
   it("applies one continuous line style and terminal arrow to custom geometry", async () => {

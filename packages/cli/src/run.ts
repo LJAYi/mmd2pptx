@@ -1,4 +1,4 @@
-import { readFile, realpath, writeFile } from "node:fs/promises";
+import { readFile, realpath, stat, writeFile } from "node:fs/promises";
 import { basename, dirname, extname, join, resolve } from "node:path";
 
 import {
@@ -148,8 +148,14 @@ export async function runCli(
 
 async function pathsReferToSameFile(left: string, right: string): Promise<boolean> {
   try {
-    const [realLeft, realRight] = await Promise.all([realpath(left), realpath(right)]);
-    return realLeft === realRight;
+    const [realLeft, realRight, leftStat, rightStat] = await Promise.all([
+      realpath(left),
+      realpath(right),
+      stat(left),
+      stat(right),
+    ]);
+    return realLeft === realRight
+      || (leftStat.dev === rightStat.dev && leftStat.ino === rightStat.ino);
   } catch {
     // A new output path normally does not exist yet.
     return false;

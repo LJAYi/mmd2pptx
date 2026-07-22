@@ -102,21 +102,21 @@ function visibilityAStar(
   ]);
   const startKey = pointKey(start);
   const goalKey = pointKey(goal);
-  const open: SearchNode[] = [{
+  const open = new MinHeap<SearchNode>(compareSearchNodes);
+  open.push({
     f: manhattan(start, goal),
     g: 0,
     h: manhattan(start, goal),
     key: startKey,
     point: start,
-  }];
+  });
   const best = new Map([[startKey, 0]]);
   const previous = new Map<string, string>();
   const points = new Map([[startKey, start], [goalKey, goal]]);
   let visited = 0;
 
   while (open.length > 0) {
-    open.sort(compareSearchNodes);
-    const current = open.shift()!;
+    const current = open.pop()!;
     if (current.g !== best.get(current.key)) continue;
     visited += 1;
     if (visited > budget) return { budgetExceeded: true, visited };
@@ -177,6 +177,50 @@ function reconstruct(
 
 function compareSearchNodes(left: SearchNode, right: SearchNode): number {
   return left.f - right.f || left.h - right.h || left.key.localeCompare(right.key);
+}
+
+class MinHeap<T> {
+  private readonly values: T[] = [];
+
+  constructor(private readonly compare: (left: T, right: T) => number) {}
+
+  get length(): number {
+    return this.values.length;
+  }
+
+  push(value: T): void {
+    this.values.push(value);
+    let index = this.values.length - 1;
+    while (index > 0) {
+      const parent = Math.floor((index - 1) / 2);
+      if (this.compare(this.values[parent]!, value) <= 0) break;
+      this.values[index] = this.values[parent]!;
+      index = parent;
+    }
+    this.values[index] = value;
+  }
+
+  pop(): T | undefined {
+    const first = this.values[0];
+    const last = this.values.pop();
+    if (this.values.length === 0 || last === undefined) return first;
+
+    let index = 0;
+    while (true) {
+      const left = index * 2 + 1;
+      if (left >= this.values.length) break;
+      const right = left + 1;
+      const child = right < this.values.length
+        && this.compare(this.values[right]!, this.values[left]!) < 0
+        ? right
+        : left;
+      if (this.compare(last, this.values[child]!) <= 0) break;
+      this.values[index] = this.values[child]!;
+      index = child;
+    }
+    this.values[index] = last;
+    return first;
+  }
 }
 
 function segmentBlocked(start: Point, end: Point, obstacles: readonly Bounds[]): boolean {

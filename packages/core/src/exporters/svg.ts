@@ -1,4 +1,9 @@
 import type {
+  DiagramExporter,
+  DiagramExportOptions,
+} from "../export-contract.js";
+import type { ConversionDiagnostic, DiagramIR } from "../types.js";
+import type {
   ExportBounds,
   ExportDiagram,
   ExportEdge,
@@ -333,8 +338,3 @@ function assertBounds(bounds: ExportBounds, label: string): void {
   number(bounds.width, `${label} width`);
   number(bounds.height, `${label} height`);
 }
-import type {
-  DiagramExporter,
-  DiagramExportOptions,
-} from "../export-contract.js";
-import type { ConversionDiagnostic, DiagramIR } from "../types.js";

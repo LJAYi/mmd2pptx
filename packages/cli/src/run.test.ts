@@ -1,4 +1,4 @@
-import { access, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { access, link, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -184,6 +184,20 @@ describe("runCli", () => {
       const outputPath = join(directory, "diagram.pptx");
       await writeFile(inputPath, SVG, "utf8");
       await symlink(inputPath, outputPath);
+      const output = recordingIo();
+
+      expect(await runCli([inputPath, "--output", outputPath], output.io)).toBe(2);
+      expect(output.errors.join("\n")).toContain("must not overwrite the input");
+      expect(await readFile(inputPath, "utf8")).toBe(SVG);
+    });
+  });
+
+  it("does not overwrite input through an output hard link", async () => {
+    await withTemporaryDirectory(async (directory) => {
+      const inputPath = join(directory, "diagram.svg");
+      const outputPath = join(directory, "diagram.pptx");
+      await writeFile(inputPath, SVG, "utf8");
+      await link(inputPath, outputPath);
       const output = recordingIo();
 
       expect(await runCli([inputPath, "--output", outputPath], output.io)).toBe(2);
