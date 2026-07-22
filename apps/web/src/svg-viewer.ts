@@ -66,8 +66,6 @@ export class SvgPanZoomViewer {
     const dimensions = measureSvg(svg);
     this.diagramWidth = dimensions.width;
     this.diagramHeight = dimensions.height;
-    this.canvas.style.width = `${this.diagramWidth}px`;
-    this.canvas.style.height = `${this.diagramHeight}px`;
     this.root.classList.add("has-diagram");
     this.setControlsEnabled(true);
     this.fit();
@@ -266,7 +264,12 @@ export class SvgPanZoomViewer {
 
   private setView(next: ViewState): void {
     this.state = next;
-    this.canvas.style.transform = `translate3d(${next.x}px, ${next.y}px, 0) scale(${next.scale})`;
+    // Give the SVG a real viewport at the requested size so the browser paints
+    // vectors at the destination resolution. Scaling a promoted HTML layer
+    // would instead magnify its cached raster texture and blur text and lines.
+    this.canvas.style.width = `${this.diagramWidth * next.scale}px`;
+    this.canvas.style.height = `${this.diagramHeight * next.scale}px`;
+    this.canvas.style.transform = `translate(${next.x}px, ${next.y}px)`;
     this.canvas.dataset.scale = String(next.scale);
     this.canvas.dataset.x = String(next.x);
     this.canvas.dataset.y = String(next.y);

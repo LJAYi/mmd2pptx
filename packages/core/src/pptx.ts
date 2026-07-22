@@ -9,6 +9,7 @@ import { parseMermaidSvg } from "./parse-svg.js";
 import { patchNativeConnectors } from "./pptx-connector-patch.js";
 import type { NativeConnectorPatch } from "./pptx-connector-patch.js";
 import { analyzeDiagramCollisions, routeOrthogonal } from "./routing/index.js";
+import { effectiveDashKind } from "./stroke-style.js";
 import type {
   ConversionDiagnostic,
   ConversionOptions,
@@ -1638,7 +1639,7 @@ function edgeLine(
   const opacity = edge.stroke?.opacity;
   return {
     color: normalizePptxColor(edge.stroke?.color ?? edge.color) ?? "333333",
-    dashType: pptxDash(edgeDashKind(edge)),
+    dashType: pptxDash(effectiveDashKind(edge)),
     width: Math.max(edge.stroke?.width ?? edge.strokeWidth ?? 1.5, 0.5),
     ...(opacity !== undefined && Number.isFinite(opacity)
       ? { transparency: Math.round((1 - Math.min(1, Math.max(0, opacity))) * 100) }
@@ -1672,14 +1673,6 @@ function finitePoint(point: Point): boolean {
 
 function samePoint(left: Point, right: Point): boolean {
   return Math.abs(left.x - right.x) < 0.000001 && Math.abs(left.y - right.y) < 0.000001;
-}
-
-function edgeDashKind(edge: DiagramEdge): DiagramLineDash | undefined {
-  if (edge.dash) return edge.dash;
-  const firstDash = edge.stroke?.dashArray?.[0];
-  if (firstDash === undefined) return undefined;
-  const width = edge.stroke?.width ?? edge.strokeWidth ?? 1;
-  return firstDash <= width * 2 ? "dot" : "dash";
 }
 
 function pptxDash(dash: DiagramLineDash | undefined): "solid" | "dash" | "sysDot" {

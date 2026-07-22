@@ -3,6 +3,7 @@ import type {
   DiagramExportOptions,
 } from "../export-contract.js";
 import type { ConversionDiagnostic, DiagramIR } from "../types.js";
+import { svgDashArray } from "../stroke-style.js";
 import type {
   ExportBounds,
   ExportDiagram,
@@ -194,8 +195,7 @@ function edgeSvg(edge: ExportEdge): string[] {
   const id = stableId("edge", edge.id);
   const points = edgePoints(edge);
   const color = styleColor(edge.stroke?.color ?? edge.color, "#333333");
-  const dashArray = edge.stroke?.dashArray
-    ?? (edge.dash === "dash" ? [8, 5] : edge.dash === "dot" ? [2, 4] : undefined);
+  const dashArray = svgDashArray(edge);
   const dash = dashArray && dashArray.length > 0
     ? `;stroke-dasharray:${dashArray.map((value) => number(value, `edge ${edge.id} dash`)).join(" ")}`
     : "";
@@ -204,15 +204,15 @@ function edgeSvg(edge: ExportEdge): string[] {
     : `;stroke-dashoffset:${number(edge.stroke.dashOffset, `edge ${edge.id} dashOffset`)}`;
   const opacity = edge.stroke?.opacity === undefined
     ? ""
-    : `;stroke-opacity:${number(edge.stroke.opacity, `edge ${edge.id} opacity`)}`;
+    : ` opacity="${number(edge.stroke.opacity, `edge ${edge.id} opacity`)}"`;
   const startMarker = markerAttribute("start", edge.startArrow, color);
   const endMarker = markerAttribute("end", edge.endArrow, color);
-  const style = `fill:none;stroke:${xml(color)};stroke-width:${number(edge.stroke?.width ?? edge.strokeWidth ?? 1.5, `edge ${edge.id} strokeWidth`)};stroke-linecap:${edge.stroke?.lineCap ?? "round"};stroke-linejoin:${edge.stroke?.lineJoin ?? "round"}${dash}${dashOffset}${opacity}`;
+  const style = `fill:none;stroke:${xml(color)};stroke-width:${number(edge.stroke?.width ?? edge.strokeWidth ?? 1.5, `edge ${edge.id} strokeWidth`)};stroke-linecap:${edge.stroke?.lineCap ?? "round"};stroke-linejoin:${edge.stroke?.lineJoin ?? "round"}${dash}${dashOffset}`;
   const geometry = edge.path
     ? `<path id="${id}-path" d="${pathData(edge.path, edge.id)}" style="${style}"${startMarker}${endMarker}/>`
     : `<polyline id="${id}-path" points="${points.map(pointPair).join(" ")}" style="${style}"${startMarker}${endMarker}/>`;
   const lines = [
-    `<g id="${id}" data-source-id="${xml(edge.id)}">`,
+    `<g id="${id}" data-source-id="${xml(edge.id)}"${opacity}>`,
     `  ${geometry}`,
   ];
   lines.push("</g>");

@@ -116,7 +116,8 @@ describe("exportDiagramToSvg", () => {
     expect(output).toContain('d="M 130,80 C 165,25 215,135 250,80"');
     expect(output).toContain("stroke:#a21caf;stroke-width:2.5");
     expect(output).toContain("stroke-linecap:square;stroke-linejoin:bevel");
-    expect(output).toContain("stroke-dasharray:3 2;stroke-opacity:0.75");
+    expect(output).toContain('data-source-id="edge A→B" opacity="0.75"');
+    expect(output).toContain("stroke-dasharray:3 2");
   });
 });
 

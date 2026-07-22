@@ -57,6 +57,10 @@ export function normalizeColor(value: string | undefined, fallback: string): str
  */
 export function styleColor(value: string | undefined, fallback: string): string {
   const color = normalizeColor(value, fallback);
+  // Standalone exports must not depend on an embedding host's CSS `color`.
+  // Parser-originated currentColor is resolved before it reaches the IR; a
+  // public IR value that is still unresolved receives the explicit fallback.
+  if (color.toLowerCase() === "currentcolor") return normalizeColor(fallback, fallback);
   if (/^#[0-9a-f]{3,8}$/i.test(color)) return color;
   if (/^[a-z][a-z0-9-]*$/i.test(color)) return color;
   if (/^(?:rgb|rgba|hsl|hsla)\(\s*[-+.\d%]+(?:\s*[,/]?\s*[-+.\d%]+){2,4}\s*\)$/i.test(color)) {

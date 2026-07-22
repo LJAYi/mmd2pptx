@@ -121,6 +121,26 @@ test("rerenders after changing the theme and retains the selected slide layout",
   await expect(page.locator("#export")).toBeEnabled();
 });
 
+test("uses Mermaid's default flowchart curve unless the source overrides it", async ({ page }) => {
+  await page.goto("/");
+  await expect(page.locator("#render-state b")).toHaveText("Rendered");
+
+  await page.locator("#source").fill([
+    "flowchart LR",
+    "  A[Alpha] --> B[Beta]",
+  ].join("\n"));
+  await expect(page.locator("#render-state b")).toHaveText("Rendered");
+  await expect(page.locator("#preview g.edgePaths path").first()).toHaveAttribute("d", /C/);
+
+  await page.locator("#source").fill([
+    '%%{init: {"flowchart": {"curve": "linear"}}}%%',
+    "flowchart LR",
+    "  A[Alpha] --> B[Beta]",
+  ].join("\n"));
+  await expect(page.locator("#render-state b")).toHaveText("Rendered");
+  await expect(page.locator("#preview g.edgePaths path").first()).toHaveAttribute("d", /^M[^C]+$/);
+});
+
 test("supports pan, zoom, fit, expand, and copy without mutating the export SVG", async ({
   context,
   page,
@@ -140,10 +160,27 @@ test("supports pan, zoom, fit, expand, and copy without mutating the export SVG"
 
   await page.locator('[data-viewer-action="reset"]').click();
   await expect(page.locator("#viewer-zoom")).toHaveText("100%");
+  const canvasAt100 = await canvas.evaluate((element) => ({
+    height: Number.parseFloat((element as HTMLElement).style.height),
+    transform: (element as HTMLElement).style.transform,
+    width: Number.parseFloat((element as HTMLElement).style.width),
+    willChange: getComputedStyle(element).willChange,
+  }));
+  expect(canvasAt100.transform).toMatch(/^translate\(/);
+  expect(canvasAt100.transform).not.toContain("scale");
+  expect(canvasAt100.willChange).toBe("auto");
 
   await page.locator('[data-viewer-action="zoom-in"]').click();
   await expect(page.locator("#viewer-zoom")).toHaveText("120%");
   await expect(canvas).toHaveAttribute("data-scale", "1.2");
+  const canvasAt120 = await canvas.evaluate((element) => ({
+    height: Number.parseFloat((element as HTMLElement).style.height),
+    transform: (element as HTMLElement).style.transform,
+    width: Number.parseFloat((element as HTMLElement).style.width),
+  }));
+  expect(canvasAt120.width).toBeCloseTo(canvasAt100.width * 1.2, 5);
+  expect(canvasAt120.height).toBeCloseTo(canvasAt100.height * 1.2, 5);
+  expect(canvasAt120.transform).not.toContain("scale");
 
   await viewport.dispatchEvent("wheel", { clientX: 100, clientY: 100, deltaY: -100 });
   await expect.poll(async () => Number(await canvas.getAttribute("data-scale"))).toBeGreaterThan(1.2);

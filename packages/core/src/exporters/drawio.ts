@@ -6,6 +6,7 @@ import type {
   ExportNode,
   ExportPoint,
 } from "./model.js";
+import { effectiveDashKind, nonZeroDashArray } from "../stroke-style.js";
 import { assertUniqueIds, number, stableId, styleColor, styleFontFamily, xml } from "./xml.js";
 import {
   exporterFailure,
@@ -316,9 +317,11 @@ function nodeStyle(node: ExportNode): string {
 }
 
 function edgeStyle(edge: ExportEdge, orthogonal: boolean): string {
-  const dash = edge.dash === "dash" ? ["dashed=1", "dashPattern=8 5"]
-    : edge.dash === "dot" ? ["dashed=1", "dashPattern=2 4"]
+  const dashKind = effectiveDashKind(edge);
+  const dash = dashKind === "dash" ? ["dashed=1", "dashPattern=8 5"]
+    : dashKind === "dot" ? ["dashed=1", "dashPattern=2 4"]
       : ["dashed=0"];
+  const dashArray = nonZeroDashArray(edge.stroke?.dashArray);
   const values = [
     orthogonal ? "edgeStyle=orthogonalEdgeStyle" : "edgeStyle=none",
     "html=1",
@@ -327,8 +330,8 @@ function edgeStyle(edge: ExportEdge, orthogonal: boolean): string {
     `strokeWidth=${number(edge.stroke?.width ?? edge.strokeWidth ?? 1.5)}`,
     `startArrow=${drawioArrow(edge.startArrow)}`,
     `endArrow=${drawioArrow(edge.endArrow)}`,
-    ...(edge.stroke?.dashArray?.length
-      ? ["dashed=1", `dashPattern=${edge.stroke.dashArray.map((value) => number(value)).join(" ")}`]
+    ...(dashArray
+      ? ["dashed=1", `dashPattern=${dashArray.map((value) => number(value)).join(" ")}`]
       : dash),
   ];
   if (edge.stroke?.opacity !== undefined) {

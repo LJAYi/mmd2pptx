@@ -406,7 +406,7 @@ async function renderDiagram(): Promise<void> {
       startOnLoad: false,
       securityLevel: "strict",
       theme: elements.theme.value as MermaidTheme,
-      flowchart: { curve: "linear", nodeSpacing: 30, rankSpacing: 42 },
+      flowchart: { nodeSpacing: 30, rankSpacing: 42 },
       themeVariables: {
         fontFamily: "Arial, sans-serif",
         lineColor: "#24323d",

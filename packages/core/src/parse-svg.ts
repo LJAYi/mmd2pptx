@@ -44,6 +44,7 @@ interface AffineMatrix {
 }
 
 interface CssDeclaration {
+  important: boolean;
   name: string;
   value: string;
 }
@@ -689,7 +690,7 @@ function readTextElement(source: Element, bounds: Bounds): DiagramText | undefin
   }
   const fontFamily = normalizeFontFamily(style.get("font-family"));
   const fontSize = parseCssNumber(style.get("font-size"));
-  const color = normalizeColor(style.get("color") ?? style.get("fill"));
+  const color = normalizeStyleColor(style.get("color") ?? style.get("fill"), style);
   return {
     bounds,
     text,
@@ -732,8 +733,8 @@ function readShapeStyle(element: Element): {
   strokeWidth?: number;
 } {
   const style = readStyle(element);
-  const fill = normalizeColor(style.get("fill"));
-  const stroke = normalizeColor(style.get("stroke"));
+  const fill = normalizeStyleColor(style.get("fill"), style);
+  const stroke = normalizeStyleColor(style.get("stroke"), style);
   const strokeWidth = parseCssNumber(style.get("stroke-width"));
   return {
     ...(fill ? { fill } : {}),
@@ -766,7 +767,14 @@ const INHERITED_STYLE_NAMES = [
   "fill",
   "font-family",
   "font-size",
+  "marker-end",
+  "marker-start",
   "stroke",
+  "stroke-dasharray",
+  "stroke-dashoffset",
+  "stroke-linecap",
+  "stroke-linejoin",
+  "stroke-opacity",
   "stroke-width",
 ] as const;
 
@@ -797,7 +805,8 @@ function buildCssContext(
           continue;
         }
         const name = raw.slice(0, separator).trim().toLowerCase();
-        const value = stripCssPriority(raw.slice(separator + 1).trim());
+        const priority = cssPriority(raw.slice(separator + 1).trim());
+        const value = priority.value;
         if (!STYLE_NAMES.has(name)) continue;
         if (/var\s*\(/i.test(value)) {
           diagnostics.push(cssDiagnostic(
@@ -808,7 +817,7 @@ function buildCssContext(
           ));
           continue;
         }
-        declarations.push({ name, value });
+        declarations.push({ important: priority.important, name, value });
       }
       for (const rawSelector of (match[1] ?? "").split(",")) {
         const selector = parseCssSelector(rawSelector.trim());
@@ -910,17 +919,35 @@ function ownStyle(element: Element): Map<string, string> {
     .filter(({ selector }) => selectorMatches(element, selector))
     .sort((left, right) => left.selector.specificity - right.selector.specificity
       || left.sourceOrder - right.sourceOrder) ?? [];
-  for (const rule of matching) {
-    for (const { name, value } of rule.declarations) style.set(name, value);
-  }
+  const inlineDeclarations: CssDeclaration[] = [];
   for (const declaration of (element.getAttribute("style") ?? "").split(";")) {
     const separator = declaration.indexOf(":");
     if (separator > 0) {
-      style.set(
-        declaration.slice(0, separator).trim().toLowerCase(),
-        stripCssPriority(declaration.slice(separator + 1).trim()),
-      );
+      const priority = cssPriority(declaration.slice(separator + 1).trim());
+      inlineDeclarations.push({
+        important: priority.important,
+        name: declaration.slice(0, separator).trim().toLowerCase(),
+        value: priority.value,
+      });
     }
+  }
+  for (const rule of matching) {
+    for (const { important, name, value } of rule.declarations) {
+      if (!important) style.set(name, value);
+    }
+  }
+  for (const { important, name, value } of inlineDeclarations) {
+    if (!important) style.set(name, value);
+  }
+  // Author !important declarations outrank all normal declarations. Inline
+  // important declarations retain the highest author-origin specificity.
+  for (const rule of matching) {
+    for (const { important, name, value } of rule.declarations) {
+      if (important) style.set(name, value);
+    }
+  }
+  for (const { important, name, value } of inlineDeclarations) {
+    if (important) style.set(name, value);
   }
   return style;
 }
@@ -1037,7 +1064,15 @@ function hasSelfOrAncestorClass(
 }
 
 function stripCssPriority(value: string): string {
-  return value.replace(/\s*!important\s*$/i, "").trim();
+  return cssPriority(value).value;
+}
+
+function cssPriority(value: string): { important: boolean; value: string } {
+  const important = /\s*!important\s*$/i.test(value);
+  return {
+    important,
+    value: value.replace(/\s*!important\s*$/i, "").trim(),
+  };
 }
 
 function readViewBox(root: Element): ViewBox | undefined {
@@ -1251,19 +1286,20 @@ function dedupePoints(points: Point[]): Point[] {
 }
 
 function edgeDash(element: Element): DiagramLineDash {
-  if (hasClass(element, "edge-pattern-dotted")) {
-    return "dot";
-  }
-  if (hasClass(element, "edge-pattern-dashed")) {
-    return "dash";
-  }
   const dashArray = readStyle(element).get("stroke-dasharray");
-  if (!dashArray || dashArray === "none") {
-    return "solid";
+  if (dashArray) {
+    const values = normalizedDashArray(dashArray);
+    if (dashArray.trim().toLowerCase() === "none" || values.length === 0) return "solid";
+    const firstDash = values[0] ?? 3;
+    const strokeWidth = parseCssNumber(readStyle(element).get("stroke-width")) ?? 1;
+    return firstDash <= strokeWidth * 2 ? "dot" : "dash";
   }
-  const firstDash = numericValues(dashArray)[0] ?? 3;
-  const strokeWidth = parseCssNumber(readStyle(element).get("stroke-width")) ?? 1;
-  return firstDash <= strokeWidth * 2 ? "dot" : "dash";
+  // Classes are a renderer-compatible fallback only when no cascaded CSS
+  // value is available. The computed dash value remains authoritative.
+  if (hasClass(element, "edge-pattern-solid")) return "solid";
+  if (hasClass(element, "edge-pattern-dotted")) return "dot";
+  if (hasClass(element, "edge-pattern-dashed")) return "dash";
+  return "solid";
 }
 
 function edgeStrokeStyle(
@@ -1271,8 +1307,7 @@ function edgeStrokeStyle(
   shapeStyle: ReturnType<typeof readShapeStyle>,
 ): DiagramStrokeStyle {
   const style = readStyle(element);
-  const dashArray = numericValues(style.get("stroke-dasharray") ?? "")
-    .filter((value) => Number.isFinite(value) && value >= 0);
+  const dashArray = normalizedDashArray(style.get("stroke-dasharray") ?? "");
   const dashOffset = parseCssNumber(style.get("stroke-dashoffset"));
   const lineCap = style.get("stroke-linecap");
   const lineJoin = style.get("stroke-linejoin");
@@ -1288,6 +1323,12 @@ function edgeStrokeStyle(
       : {}),
     ...(opacity !== undefined ? { opacity: Math.min(1, Math.max(0, opacity)) } : {}),
   };
+}
+
+function normalizedDashArray(value: string): number[] {
+  const values = numericValues(value)
+    .filter((item) => Number.isFinite(item) && item >= 0);
+  return values.length > 0 && values.some((item) => item > 0) ? values : [];
 }
 
 function explicitSemanticEndpoint(element: Element, end: "source" | "target"): string | undefined {
@@ -1534,6 +1575,18 @@ function normalizeColor(value: string | null | undefined): string | undefined {
       .toUpperCase();
   }
   return undefined;
+}
+
+function normalizeStyleColor(
+  value: string | null | undefined,
+  style: ReadonlyMap<string, string>,
+): string | undefined {
+  if (value?.trim().toLowerCase() === "currentcolor") {
+    const inheritedColor = style.get("color");
+    if (!inheritedColor || inheritedColor.trim().toLowerCase() === "currentcolor") return undefined;
+    return normalizeColor(inheritedColor);
+  }
+  return normalizeColor(value);
 }
 
 function normalizeText(value: string): string {
