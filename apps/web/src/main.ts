@@ -6,6 +6,7 @@ import {
 import mermaid from "mermaid";
 
 import { EXAMPLE_DIAGRAM, MINI_EXAMPLE } from "./example.js";
+import { SvgPanZoomViewer } from "./svg-viewer.js";
 import "./styles.css";
 
 type MermaidTheme = "base" | "default" | "forest" | "dark" | "neutral";
@@ -118,10 +119,50 @@ app.innerHTML = `
             </div>
           </div>
           <div id="preview-stage" class="preview-stage">
-            <div id="preview" class="preview" aria-live="polite"></div>
+            <div
+              id="preview-viewport"
+              class="preview-viewport"
+              tabindex="0"
+              role="region"
+              aria-label="Interactive Mermaid preview. Drag to pan; use the mouse wheel or toolbar to zoom."
+            >
+              <div id="preview-canvas" class="preview-canvas">
+                <div id="preview" class="preview" aria-live="polite"></div>
+              </div>
+            </div>
             <div id="empty-state" class="empty-state" hidden>
               <span aria-hidden="true">⌁</span>
               <p>Add a Mermaid diagram to see it here.</p>
+            </div>
+            <div id="viewer-feedback" class="viewer-feedback" role="status" aria-live="polite"></div>
+            <div class="preview-toolbar" role="toolbar" aria-label="Diagram view controls">
+              <button data-viewer-action="zoom-out" type="button" aria-label="Zoom out" title="Zoom out (−)" aria-keyshortcuts="-">
+                <span aria-hidden="true">−</span>
+              </button>
+              <output id="viewer-zoom" aria-label="Current zoom">—</output>
+              <button data-viewer-action="zoom-in" type="button" aria-label="Zoom in" title="Zoom in (+)" aria-keyshortcuts="+">
+                <span aria-hidden="true">+</span>
+              </button>
+              <span class="toolbar-divider" aria-hidden="true"></span>
+              <button data-viewer-action="reset" type="button" aria-label="Reset to 100 percent" title="Reset to 100% (0)" aria-keyshortcuts="0">
+                <span aria-hidden="true">↺</span>
+              </button>
+              <button data-viewer-action="fit" type="button" aria-label="Fit diagram to view" title="Fit diagram to view (F)" aria-keyshortcuts="F">
+                <span aria-hidden="true">⊡</span>
+              </button>
+              <button data-viewer-action="fit-width" type="button" aria-label="Fit diagram width" title="Fit diagram width (W)" aria-keyshortcuts="W">
+                <span aria-hidden="true">↔</span>
+              </button>
+              <span class="toolbar-divider" aria-hidden="true"></span>
+              <button data-viewer-action="copy-source" type="button" aria-label="Copy Mermaid source" title="Copy Mermaid source">
+                <span class="toolbar-code-icon" aria-hidden="true">{ }</span>
+              </button>
+              <button data-viewer-action="copy-svg" type="button" aria-label="Copy SVG" title="Copy SVG">
+                <span class="toolbar-code-icon" aria-hidden="true">&lt; &gt;</span>
+              </button>
+              <button data-viewer-action="expand" type="button" aria-label="Expand preview" title="Expand preview" aria-expanded="false">
+                <span aria-hidden="true">⛶</span>
+              </button>
             </div>
           </div>
           <footer class="panel-footer preview-footer">
@@ -187,12 +228,18 @@ const elements = {
   },
   miniExample: required<HTMLButtonElement>("#mini-example"),
   preview: required<HTMLDivElement>("#preview"),
+  previewStage: required<HTMLDivElement>("#preview-stage"),
   renderState: required<HTMLDivElement>("#render-state"),
   source: required<HTMLTextAreaElement>("#source"),
   sourceLink: required<HTMLAnchorElement>("#source-link"),
   sourceCount: required<HTMLSpanElement>("#source-count"),
   theme: required<HTMLSelectElement>("#theme"),
 };
+
+const svgViewer = new SvgPanZoomViewer({
+  getSource: () => elements.source.value,
+  root: elements.previewStage,
+});
 
 const repositoryUrl = import.meta.env.VITE_REPOSITORY_URL;
 if (repositoryUrl) {
@@ -218,13 +265,13 @@ elements.source.addEventListener("input", () => {
 elements.theme.addEventListener("change", () => scheduleRender(0));
 elements.background.addEventListener("input", () => {
   elements.backgroundValue.value = elements.background.value.toUpperCase();
-  elements.preview.style.background = elements.background.value;
+  elements.previewStage.style.backgroundColor = elements.background.value;
   scheduleReadinessCheck();
 });
 elements.layout.addEventListener("change", scheduleReadinessCheck);
 elements.fullExample.addEventListener("click", () => loadExample(EXAMPLE_DIAGRAM));
 elements.miniExample.addEventListener("click", () => loadExample(MINI_EXAMPLE));
-elements.fitPreview.addEventListener("click", fitPreview);
+elements.fitPreview.addEventListener("click", () => svgViewer.fit());
 elements.exportButton.addEventListener("click", () => void exportPowerPoint());
 window.addEventListener("keydown", (event) => {
   if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
@@ -268,6 +315,7 @@ async function renderDiagram(): Promise<void> {
 
   if (!source) {
     elements.preview.replaceChildren();
+    svgViewer.clear();
     elements.emptyState.hidden = false;
     lastState = { diagnostics: [], syntaxError: "Enter Mermaid source to continue." };
     setRenderState("waiting", "Waiting");
@@ -294,12 +342,13 @@ async function renderDiagram(): Promise<void> {
     if (sequence !== renderSequence) return;
 
     elements.preview.innerHTML = rendered.svg;
-    elements.preview.style.background = elements.background.value;
+    elements.previewStage.style.backgroundColor = elements.background.value;
     elements.emptyState.hidden = true;
     const svg = elements.preview.querySelector("svg");
     if (svg) {
       svg.setAttribute("role", "img");
       svg.setAttribute("aria-label", "Rendered Mermaid diagram");
+      svgViewer.setSvg(svg);
     }
     setRenderState("ready", "Rendered");
     await inspectConversion();
@@ -307,6 +356,7 @@ async function renderDiagram(): Promise<void> {
     if (sequence !== renderSequence) return;
     const message = readableError(error);
     elements.preview.replaceChildren();
+    svgViewer.clear();
     elements.emptyState.hidden = false;
     lastState = { diagnostics: [], syntaxError: message };
     setRenderState("error", "Syntax error");
@@ -384,17 +434,6 @@ function setRenderState(kind: string, label: string): void {
   elements.renderState.className = `render-state ${kind}`;
   const text = elements.renderState.querySelector("b");
   if (text) text.textContent = label;
-}
-
-function fitPreview(): void {
-  const svg = elements.preview.querySelector<SVGSVGElement>("svg");
-  if (!svg) return;
-  svg.removeAttribute("height");
-  svg.removeAttribute("width");
-  svg.style.maxHeight = "100%";
-  svg.style.maxWidth = "100%";
-  svg.style.height = "auto";
-  svg.style.width = "auto";
 }
 
 async function exportPowerPoint(): Promise<void> {
