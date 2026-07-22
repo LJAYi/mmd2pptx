@@ -254,6 +254,53 @@ describe("svgStringToPptxBuffer", () => {
     expect(slideXml).toContain(`<a:endCxn id="${targetNodeId}"`);
   });
 
+  it("uses one bound native connector for a multi-segment Mermaid basis curve", async () => {
+    const result = await diagramToPptxBuffer({
+      edges: [{
+        end: { x: 220, y: 60 },
+        endArrow: "triangle",
+        id: "basis-A-to-B",
+        path: { segments: [
+          { kind: "move", to: { x: 80, y: 60 } },
+          { kind: "line", to: { x: 95, y: 60 } },
+          { control1: { x: 110, y: 60 }, control2: { x: 120, y: 45 }, kind: "cubic", to: { x: 145, y: 45 } },
+          { control1: { x: 170, y: 45 }, control2: { x: 185, y: 60 }, kind: "cubic", to: { x: 205, y: 60 } },
+          { kind: "line", to: { x: 220, y: 60 } },
+        ] },
+        sourceId: "A",
+        start: { x: 80, y: 60 },
+        targetId: "B",
+      }],
+      height: 120,
+      nodes: [{
+        bounds: { height: 60, width: 60, x: 20, y: 30 },
+        id: "A",
+        kind: "rect",
+        text: { bounds: { height: 20, width: 50, x: 25, y: 50 }, text: "Start" },
+      }, {
+        bounds: { height: 60, width: 60, x: 220, y: 30 },
+        id: "B",
+        kind: "rect",
+        text: { bounds: { height: 20, width: 50, x: 225, y: 50 }, text: "Finish" },
+      }],
+      width: 300,
+    }, { mode: "smart" });
+
+    expect(result.diagnostics).not.toContainEqual(expect.objectContaining({
+      code: "PPTX_SMART_EDGE_FREEFORM_FALLBACK",
+    }));
+    expect(result.summary).toMatchObject({ editableObjects: 3, fallbackObjects: 0 });
+    const zip = await JSZip.loadAsync(result.data);
+    const slideXml = await zip.file("ppt/slides/slide1.xml")?.async("string") ?? "";
+    expect(slideXml).toContain('<a:prstGeom prst="curvedConnector3">');
+    expect(slideXml.match(/<p:cxnSp(?:\s|>)/g)).toHaveLength(1);
+    expect(slideXml.match(/<a:stCxn id="\d+" idx="\d+"\/>/g)).toHaveLength(1);
+    expect(slideXml.match(/<a:endCxn id="\d+" idx="\d+"\/>/g)).toHaveLength(1);
+    expect(slideXml).not.toContain("mmd2pptx-label:node:");
+    expect(slideXml).toContain(">Start</a:t>");
+    expect(slideXml).toContain(">Finish</a:t>");
+  });
+
   it("warns when a requested smart endpoint cannot be bound", async () => {
     const result = await diagramToPptxBuffer({
       edges: [{
@@ -306,7 +353,16 @@ describe("svgStringToPptxBuffer", () => {
     expect(slideXml).toContain("<asvg:svgBlip");
     const svgMedia = Object.keys(zip.files).filter((name) => name.endsWith(".svg"));
     expect(svgMedia).toHaveLength(1);
-    expect(await zip.file(svgMedia[0]!)?.async("string")).toContain("flowchart-A-0");
+    const embeddedSvg = await zip.file(svgMedia[0]!)?.async("string") ?? "";
+    expect(embeddedSvg).toContain("flowchart-A-0");
+    expect(embeddedSvg).not.toContain("foreignObject");
+    expect(embeddedSvg).toContain("<text");
+    expect(embeddedSvg).toContain("Start");
+    expect(embeddedSvg).not.toContain("dominant-baseline");
+    expect(embeddedSvg).not.toContain(" dy=");
+    expect(result.diagnostics).toContainEqual(expect.objectContaining({
+      code: "PPTX_EXACT_FOREIGN_OBJECT_NORMALIZED",
+    }));
   });
 
   it("removes active content and external references from exact SVG media", async () => {
@@ -372,7 +428,7 @@ describe("svgStringToPptxBuffer", () => {
         path: { segments: [
           { kind: "move", to: { x: 20, y: 80 } },
           { kind: "line", to: { x: 70, y: 40 } },
-          { control: { x: 120, y: 10 }, kind: "quadratic", to: { x: 180, y: 80 } },
+          { kind: "line", to: { x: 180, y: 80 } },
         ] },
         start: { x: 20, y: 80 },
       }, {

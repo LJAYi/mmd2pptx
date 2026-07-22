@@ -90,7 +90,7 @@ describe("PPTX groups and shared zIndex", () => {
     async (mode) => {
       const result = await diagramToPptxBuffer(ORDERED_DIAGRAM, { mode });
       expect(result.diagnostics.filter(({ severity }) => severity === "error")).toEqual([]);
-      expect(result.summary).toMatchObject({ editableObjects: 13, fallbackObjects: 0 });
+      expect(result.summary).toMatchObject({ editableObjects: 11, fallbackObjects: 0 });
       expect(await objectNames(result.data)).toEqual([
         "mmd2pptx-group:group-low",
         "mmd2pptx-group:group-default-a",
@@ -100,12 +100,16 @@ describe("PPTX groups and shared zIndex", () => {
         "mmd2pptx-edge:edge-high",
         "mmd2pptx-node:node-low",
         "mmd2pptx-node:node-high",
-        "mmd2pptx-label:node:node-high",
         "mmd2pptx-label:group:group-high",
-        "mmd2pptx-label:node:node-low",
         "mmd2pptx-label:group:group-default-a",
         "mmd2pptx-label:edge:edge-high",
       ]);
+
+      const zip = await JSZip.loadAsync(result.data);
+      const xml = await zip.file("ppt/slides/slide1.xml")?.async("string") ?? "";
+      expect(xml).toMatch(/name="mmd2pptx-node:node-low"[\s\S]*?<p:txBody>/);
+      expect(xml).toMatch(/name="mmd2pptx-node:node-high"[\s\S]*?<p:txBody>/);
+      expect(xml).not.toContain("mmd2pptx-label:node:");
     },
   );
 

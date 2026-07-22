@@ -13,8 +13,8 @@ test("renders the synthetic default and downloads a non-empty PowerPoint ZIP", a
   await expect(page.locator("#diagnostic-badge")).toContainText("notes");
   await expect(page.locator("#metric-nodes")).toHaveText("9");
   await expect(page.locator("#metric-edges")).toHaveText("10");
-  await expect(page.locator("#metric-editable")).toHaveText("28");
-  await expect(page.locator("#metric-fallback")).not.toHaveText("0");
+  await expect(page.locator("#metric-editable")).toHaveText("19");
+  await expect(page.locator("#metric-fallback")).toHaveText("0");
   await expect(page.locator("#preview svg")).toBeVisible();
 
   const downloadPromise = page.waitForEvent("download");

@@ -7,7 +7,7 @@ import { exportDiagramToSvg } from "./exporters/svg.js";
 import { normalizeFontFamily } from "./normalize-font-family.js";
 import { parseMermaidSvg } from "./parse-svg.js";
 import { patchNativeConnectors } from "./pptx-connector-patch.js";
-import type { NativeConnectorPatch } from "./pptx-connector-patch.js";
+import type { NativeConnectorPatch, NativeNodeTextPatch } from "./pptx-connector-patch.js";
 import { analyzeDiagramCollisions, routeOrthogonal } from "./routing/index.js";
 import { effectiveDashKind } from "./stroke-style.js";
 import type {
@@ -347,6 +347,7 @@ export async function diagramToPptxBuffer(
   let editableEdgeObjects = 0;
   let fallbackObjects = 0;
   const connectorPatches: NativeConnectorPatch[] = [];
+  const nodeTextPatches: NativeNodeTextPatch[] = [];
   for (const group of stableZOrder(workingDiagram.groups ?? [])) {
     addEditableGroup(slide, pptx, group, scale, offsetX, offsetY);
   }
@@ -417,6 +418,13 @@ export async function diagramToPptxBuffer(
     const fill = { color: normalizePptxColor(node.fill) ?? "FFFFFF" };
 
     slide.addShape(shape, { objectName: nodeObjectName(node.id), x, y, w, h, fill, line });
+    if (node.text) {
+      nodeTextPatches.push({
+        elementId: node.id,
+        labelObjectName: textObjectName("node", node.id),
+        nodeObjectName: nodeObjectName(node.id),
+      });
+    }
   }
 
   // Cross-category stacking is fixed: groups, connectors, nodes, then labels.
@@ -437,27 +445,41 @@ export async function diagramToPptxBuffer(
 
   const raw = await pptx.write({ outputType: "arraybuffer", compression: true });
   let data = toUint8Array(raw);
-  if (connectorPatches.length > 0) {
-    const patched = await patchNativeConnectors(data, connectorPatches);
+  let mergedNodeTexts = 0;
+  if (connectorPatches.length > 0 || nodeTextPatches.length > 0) {
+    const patched = await patchNativeConnectors(data, connectorPatches, nodeTextPatches);
     data = patched.data;
+    mergedNodeTexts = patched.mergedNodeTexts;
     const bindingFallbacks = new Set(patched.diagnostics
       .filter(({ code }) => code.endsWith("CONNECTOR_BINDING_FALLBACK"))
       .map(({ elementId }, index) => elementId ?? `document-${index}`));
     if (bindingFallbacks.size > 0) {
       summary = { ...summary, fallbackObjects: summary.fallbackObjects + bindingFallbacks.size };
     }
-    diagnostics.push(...patched.diagnostics, {
-      code: mode === "faithful"
-        ? "PPTX_FAITHFUL_CONNECTOR_CROSS_PLATFORM_UNVERIFIED"
-        : "PPTX_SMART_CONNECTOR_CROSS_PLATFORM_UNVERIFIED",
-      message: "Native connector OOXML is structurally verified, but node-following behavior has not yet been manually certified across PowerPoint Windows/macOS/web and LibreOffice.",
-      severity: "info",
-    });
+    const nodeTextFallbacks = nodeTextPatches.length - mergedNodeTexts;
+    if (nodeTextFallbacks > 0) {
+      summary = {
+        ...summary,
+        editableObjects: summary.editableObjects + nodeTextFallbacks,
+        fallbackObjects: summary.fallbackObjects + nodeTextFallbacks,
+      };
+    }
+    diagnostics.push(...patched.diagnostics);
+    if (connectorPatches.length > 0) {
+      diagnostics.push({
+        code: mode === "faithful"
+          ? "PPTX_FAITHFUL_CONNECTOR_CROSS_PLATFORM_UNVERIFIED"
+          : "PPTX_SMART_CONNECTOR_CROSS_PLATFORM_UNVERIFIED",
+        message: "Native connector OOXML is structurally verified, but node-following behavior has not yet been manually certified across PowerPoint Windows/macOS/web and LibreOffice.",
+        severity: "info",
+      });
+    }
   }
   const labels = diagramTextObjects(workingDiagram).length;
   diagnostics.push(...await validatePowerPointXml(
     data,
-    (workingDiagram.groups?.length ?? 0) + workingDiagram.nodes.length + emittedEdgeObjects + labels,
+    (workingDiagram.groups?.length ?? 0) + workingDiagram.nodes.length + emittedEdgeObjects
+      + labels - mergedNodeTexts,
   ));
   return { data, diagnostics, summary };
 }
@@ -492,10 +514,23 @@ export async function svgStringToPptxBuffer(
     };
   }
   if (options.mode === "exact") {
-    const generated = await exactSvgToPptxBuffer(svg, parsed.data, options);
+    const normalizedForeignObjects = /<foreignObject(?:\s|>)/i.test(svg);
+    const generated = await exactSvgToPptxBuffer(
+      normalizedForeignObjects ? exportDiagramToSvg(parsed.data) : svg,
+      parsed.data,
+      options,
+    );
     return {
       data: generated.data,
-      diagnostics: [...parsed.diagnostics, ...generated.diagnostics],
+      diagnostics: [
+        ...parsed.diagnostics,
+        ...(normalizedForeignObjects ? [{
+          code: "PPTX_EXACT_FOREIGN_OBJECT_NORMALIZED",
+          message: "Converted Mermaid HTML labels to portable SVG text so PowerPoint displays them.",
+          severity: "info" as const,
+        }] : []),
+        ...generated.diagnostics,
+      ],
       summary: generated.summary,
     };
   }
@@ -817,6 +852,10 @@ function diagramTextObjects(diagram: DiagramIR): DiagramTextObject[] {
   ];
 }
 
+function standaloneDiagramTextObjects(diagram: DiagramIR): DiagramTextObject[] {
+  return diagramTextObjects(diagram).filter(({ ownerKind }) => ownerKind !== "node");
+}
+
 /** Stable ascending z-order; an omitted zIndex occupies the default layer 0. */
 function stableZOrder<T extends { zIndex?: number | undefined }>(items: readonly T[]): T[] {
   return items
@@ -1047,7 +1086,7 @@ function summaryFor(
   }
   return {
     editableObjects: (diagram.groups?.length ?? 0) + diagram.nodes.length
-      + diagramTextObjects(diagram).length + diagram.edges.reduce((count, edge) =>
+      + standaloneDiagramTextObjects(diagram).length + diagram.edges.reduce((count, edge) =>
       count + (mode === "faithful" ? 1 : Math.max(1, edgePoints(edge).length - 1)), 0),
     edges: diagram.edges.length,
     fallbackObjects: 0,
@@ -1060,7 +1099,7 @@ function actualSummary(
   edgeObjects: number,
   fallbackObjects: number,
 ): ConversionSummary {
-  const labels = diagramTextObjects(diagram).length;
+  const labels = standaloneDiagramTextObjects(diagram).length;
   return {
     editableObjects: (diagram.groups?.length ?? 0) + diagram.nodes.length + edgeObjects + labels,
     edges: diagram.edges.length,
@@ -1218,9 +1257,15 @@ function smartConnectorKind(edge: DiagramEdge): "curved" | "orthogonal" | "strai
     const kind = classifyDiagramPath(edge.path);
     if (kind === "straight" || kind === "orthogonal") return kind;
     if (kind === "curved") {
-      const drawable = edge.path.segments.filter(({ kind: segmentKind }) => segmentKind !== "move");
-      return drawable.length === 1 ? "curved" : undefined;
+      return "curved";
     }
+    const moves = edge.path.segments.filter(({ kind: segmentKind }) => segmentKind === "move");
+    const drawable = edge.path.segments.filter(({ kind: segmentKind }) => segmentKind !== "move");
+    const mermaidBasisCurve = moves.length === 1
+      && drawable.some(({ kind: segmentKind }) => segmentKind === "cubic" || segmentKind === "quadratic")
+      && drawable.every(({ kind: segmentKind }) =>
+        segmentKind === "line" || segmentKind === "cubic" || segmentKind === "quadratic");
+    if (mermaidBasisCurve) return "curved";
     return undefined;
   }
   const points = edgePoints(edge);
