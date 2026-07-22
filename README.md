@@ -28,6 +28,12 @@ to leave the user's device.
 
 ## Web app
 
+The preview viewer supports mouse or touch dragging, pointer-centered wheel
+zoom, 100% reset, fit-to-view, fit-to-width, an expanded view, and copying the
+Mermaid source or rendered SVG. Keyboard users can pan with the arrow keys and
+use `+`, `-`, `0`, `F`, or `W` for the matching view actions. Viewer transforms
+are applied outside the SVG, so changing the preview never changes PPTX output.
+
 Install dependencies and start the development server:
 
 ```bash
