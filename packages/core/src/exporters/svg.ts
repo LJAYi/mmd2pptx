@@ -54,10 +54,14 @@ export function exportDiagramToSvg(
   assertUniqueIds("node", diagram.nodes);
   assertUniqueIds("edge", diagram.edges);
   assertUniqueIds("group", diagram.groups ?? []);
+  const markerDefinitions = collectMarkers(diagram.edges);
   const body: string[] = [];
 
   if (options.title) {
     body.push(`  <title>${xml(options.title)}</title>`);
+  }
+  if (markerDefinitions.length > 0) {
+    body.push("  <defs>", ...markerDefinitions.map((definition) => `    ${definition}`), "  </defs>");
   }
   if (diagram.backgroundColor) {
     body.push(
@@ -195,31 +199,21 @@ function edgeSvg(edge: ExportEdge): string[] {
   const dash = dashArray && dashArray.length > 0
     ? `;stroke-dasharray:${dashArray.map((value) => number(value, `edge ${edge.id} dash`)).join(" ")}`
     : "";
-  const dashAttribute = dashArray && dashArray.length > 0
-    ? ` stroke-dasharray="${dashArray.map((value) => number(value, `edge ${edge.id} dash`)).join(" ")}"`
-    : "";
   const dashOffset = edge.stroke?.dashOffset === undefined
     ? ""
     : `;stroke-dashoffset:${number(edge.stroke.dashOffset, `edge ${edge.id} dashOffset`)}`;
   const opacity = edge.stroke?.opacity === undefined
     ? ""
     : ` opacity="${number(edge.stroke.opacity, `edge ${edge.id} opacity`)}"`;
-  const strokeWidth = number(edge.stroke?.width ?? edge.strokeWidth ?? 1.5, `edge ${edge.id} strokeWidth`);
-  const lineCap = edge.stroke?.lineCap ?? "round";
-  const lineJoin = edge.stroke?.lineJoin ?? "round";
-  const presentation = ` fill="none" stroke="${xml(color)}" stroke-width="${strokeWidth}" stroke-linecap="${lineCap}" stroke-linejoin="${lineJoin}"${dashAttribute}`;
-  const style = `fill:none;stroke:${xml(color)};stroke-width:${strokeWidth};stroke-linecap:${lineCap};stroke-linejoin:${lineJoin}${dash}${dashOffset}`;
+  const startMarker = markerAttribute("start", edge.startArrow, color);
+  const endMarker = markerAttribute("end", edge.endArrow, color);
+  const style = `fill:none;stroke:${xml(color)};stroke-width:${number(edge.stroke?.width ?? edge.strokeWidth ?? 1.5, `edge ${edge.id} strokeWidth`)};stroke-linecap:${edge.stroke?.lineCap ?? "round"};stroke-linejoin:${edge.stroke?.lineJoin ?? "round"}${dash}${dashOffset}`;
   const geometry = edge.path
-    ? `<path id="${id}-path" d="${pathData(edge.path, edge.id)}"${presentation} style="${style}"/>`
-    : `<polyline id="${id}-path" points="${points.map(pointPair).join(" ")}"${presentation} style="${style}"/>`;
-  const arrows = [
-    explicitArrowSvg(edge, "start", edge.startArrow, color, Number(strokeWidth), id),
-    explicitArrowSvg(edge, "end", edge.endArrow, color, Number(strokeWidth), id),
-  ].filter((line): line is string => Boolean(line));
+    ? `<path id="${id}-path" d="${pathData(edge.path, edge.id)}" style="${style}"${startMarker}${endMarker}/>`
+    : `<polyline id="${id}-path" points="${points.map(pointPair).join(" ")}" style="${style}"${startMarker}${endMarker}/>`;
   const lines = [
     `<g id="${id}" data-source-id="${xml(edge.id)}"${opacity}>`,
     `  ${geometry}`,
-    ...arrows.map((arrow) => `  ${arrow}`),
   ];
   lines.push("</g>");
   return lines;
@@ -238,162 +232,58 @@ function textSvg(text: ExportText, id: string): string[] {
   assertBounds(text.bounds, `text ${id}`);
   const x = number(text.bounds.x + text.bounds.width / 2);
   const lines = text.text.split(/\r?\n/);
-  const fontSize = text.fontSize ?? 14;
-  const lineHeight = fontSize * 1.2;
-  // SVG's dominant-baseline support differs across browsers, PowerPoint, and
-  // Illustrator. Use explicit alphabetic baselines instead. The 0.35em shift
-  // is the conventional optical-centering offset from an em-box center to an
-  // alphabetic baseline, so importers that ignore dominant-baseline still
-  // render the same vertical position.
-  const firstBaseline = text.bounds.y + text.bounds.height / 2
-    - ((lines.length - 1) * lineHeight) / 2
-    + fontSize * 0.35;
+  const lineHeight = (text.fontSize ?? 14) * 1.2;
+  const startY = text.bounds.y + text.bounds.height / 2
+    - ((lines.length - 1) * lineHeight) / 2;
   const style = [
     `fill:${xml(styleColor(text.color, "#222222"))}`,
     `font-family:${xml(styleFontFamily(text.fontFamily))}`,
-    `font-size:${number(fontSize)}px`,
+    `font-size:${number(text.fontSize ?? 14)}px`,
     "text-anchor:middle",
+    "dominant-baseline:middle",
   ].join(";");
   return [
-    `<text id="${id}" x="${x}" y="${number(firstBaseline)}" style="${style}">`,
-    ...lines.map((line, index) => `  <tspan x="${x}" y="${number(firstBaseline + index * lineHeight)}">${xml(line)}</tspan>`),
+    `<text id="${id}" x="${x}" y="${number(startY)}" style="${style}">`,
+    ...lines.map((line, index) => `  <tspan x="${x}" dy="${index === 0 ? "0" : number(lineHeight)}">${xml(line)}</tspan>`),
     "</text>",
   ];
 }
 
-function explicitArrowSvg(
-  edge: ExportEdge,
-  position: "end" | "start",
-  kind: string | undefined,
-  color: string,
-  strokeWidth: number,
-  edgeId: string,
-): string | undefined {
-  if (!kind || kind === "none") return undefined;
-  const { direction, point } = arrowPlacement(edge, position);
-  const size = Math.max(8, strokeWidth * 8);
-  const halfWidth = size * 0.45;
-  const perpendicular = { x: -direction.y, y: direction.x };
-  const behind = (distance: number): ExportPoint => ({
-    x: point.x - direction.x * distance,
-    y: point.y - direction.y * distance,
-  });
-  const offset = (origin: ExportPoint, distance: number): ExportPoint => ({
-    x: origin.x + perpendicular.x * distance,
-    y: origin.y + perpendicular.y * distance,
-  });
-  const id = `${edgeId}-arrow-${position}`;
-  const metadata = `id="${id}" data-diagram-arrow="${position}" data-arrow-kind="${xml(kind)}"`;
-  if (kind === "oval") {
-    const radiusX = size * 0.55;
-    const center = behind(radiusX);
-    const angle = number(Math.atan2(direction.y, direction.x) * 180 / Math.PI);
-    return `<ellipse ${metadata} cx="${number(center.x)}" cy="${number(center.y)}" rx="${number(radiusX)}" ry="${number(size * 0.35)}" fill="${xml(color)}" stroke="${xml(color)}" stroke-width="${number(strokeWidth)}" transform="rotate(${angle} ${number(center.x)} ${number(center.y)})"/>`;
-  }
-  if (kind === "diamond") {
-    const center = behind(size * 0.65);
-    const back = behind(size * 1.3);
-    const upper = offset(center, halfWidth);
-    const lower = offset(center, -halfWidth);
-    return `<path ${metadata} d="M ${pointPair(point)} L ${pointPair(upper)} L ${pointPair(back)} L ${pointPair(lower)} Z" fill="${xml(color)}" stroke="${xml(color)}" stroke-width="${number(strokeWidth)}" stroke-linejoin="round"/>`;
-  }
-  const base = behind(size);
-  const upper = offset(base, halfWidth);
-  const lower = offset(base, -halfWidth);
-  const close = kind === "arrow" ? "" : " Z";
-  return `<path ${metadata} d="M ${pointPair(upper)} L ${pointPair(point)} L ${pointPair(lower)}${close}" fill="${kind === "arrow" ? "none" : xml(color)}" stroke="${xml(color)}" stroke-width="${number(strokeWidth)}" stroke-linecap="round" stroke-linejoin="round"/>`;
-}
-
-function arrowPlacement(
-  edge: ExportEdge,
-  position: "end" | "start",
-): { direction: ExportPoint; point: ExportPoint } {
-  const directed = edge.path ? directedPathSegments(edge.path) : [];
-  if (directed.length > 0) {
-    const segment = position === "start" ? directed[0]! : directed.at(-1)!;
-    const candidates = position === "start"
-      ? startTangentCandidates(segment)
-      : endTangentCandidates(segment);
-    const alongPath = normalizedDirection(candidates);
-    return {
-      direction: position === "start"
-        ? { x: -alongPath.x, y: -alongPath.y }
-        : alongPath,
-      point: position === "start" ? segment.from : segment.to,
-    };
-  }
-  const points = edgePoints(edge);
-  const start = points[0] ?? edge.start;
-  const end = points.at(-1) ?? edge.end;
-  const adjacent = position === "start" ? points[1] ?? end : points.at(-2) ?? start;
-  const alongPath = position === "start"
-    ? normalizedDirection([{ x: adjacent.x - start.x, y: adjacent.y - start.y }])
-    : normalizedDirection([{ x: end.x - adjacent.x, y: end.y - adjacent.y }]);
-  return {
-    direction: position === "start" ? { x: -alongPath.x, y: -alongPath.y } : alongPath,
-    point: position === "start" ? start : end,
-  };
-}
-
-interface DirectedPathSegment {
-  from: ExportPoint;
-  segment: ExportPathSegment;
-  to: ExportPoint;
-}
-
-function directedPathSegments(path: ExportPath): DirectedPathSegment[] {
-  const directed: DirectedPathSegment[] = [];
-  let current: ExportPoint | undefined;
-  for (const segment of path.segments) {
-    if (segment.kind === "move") {
-      current = segment.to;
-      continue;
+function collectMarkers(edges: readonly ExportEdge[]): string[] {
+  const markerKeys = new Map<string, { color: string; kind: string }>();
+  for (const edge of edges) {
+    const color = styleColor(edge.stroke?.color ?? edge.color, "#333333");
+    for (const kind of [edge.startArrow, edge.endArrow]) {
+      if (kind && kind !== "none") {
+        markerKeys.set(markerId(kind, color), { color, kind });
+      }
     }
-    if (segment.kind === "close" || !current) continue;
-    directed.push({ from: current, segment, to: segment.to });
-    current = segment.to;
   }
-  return directed;
+  return [...markerKeys.entries()]
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([id, { color, kind }]) => markerSvg(id, kind, color));
 }
 
-function startTangentCandidates(segment: DirectedPathSegment): ExportPoint[] {
-  const { from, to } = segment;
-  if (segment.segment.kind === "cubic") return [
-    vector(from, segment.segment.control1),
-    vector(from, segment.segment.control2),
-    vector(from, to),
-  ];
-  if (segment.segment.kind === "quadratic") return [
-    vector(from, segment.segment.control),
-    vector(from, to),
-  ];
-  return [vector(from, to)];
+function markerAttribute(position: "start" | "end", kind: string | undefined, color: string): string {
+  return kind && kind !== "none"
+    ? ` marker-${position}="url(#${markerId(kind, color)})"`
+    : "";
 }
 
-function endTangentCandidates(segment: DirectedPathSegment): ExportPoint[] {
-  const { from, to } = segment;
-  if (segment.segment.kind === "cubic") return [
-    vector(segment.segment.control2, to),
-    vector(segment.segment.control1, to),
-    vector(from, to),
-  ];
-  if (segment.segment.kind === "quadratic") return [
-    vector(segment.segment.control, to),
-    vector(from, to),
-  ];
-  return [vector(from, to)];
+function markerId(kind: string, color: string): string {
+  return stableId(`marker-${kind}`, color);
 }
 
-function vector(from: ExportPoint, to: ExportPoint): ExportPoint {
-  return { x: to.x - from.x, y: to.y - from.y };
-}
-
-function normalizedDirection(candidates: readonly ExportPoint[]): ExportPoint {
-  for (const candidate of candidates) {
-    const length = Math.hypot(candidate.x, candidate.y);
-    if (length > 0.000001) return { x: candidate.x / length, y: candidate.y / length };
+function markerSvg(id: string, kind: string, color: string): string {
+  const style = `fill:${xml(color)};stroke:${xml(color)}`;
+  if (kind === "diamond") {
+    return `<marker id="${id}" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M 1 5 L 5 1 L 9 5 L 5 9 Z" style="${style}"/></marker>`;
   }
-  return { x: 1, y: 0 };
+  if (kind === "oval") {
+    return `<marker id="${id}" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><ellipse cx="5" cy="5" rx="4" ry="3" style="${style}"/></marker>`;
+  }
+  const fill = kind === "arrow" ? "none" : xml(color);
+  return `<marker id="${id}" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M 1 1 L 9 5 L 1 9${kind === "arrow" ? "" : " Z"}" style="fill:${fill};stroke:${xml(color)}"/></marker>`;
 }
 
 function edgePoints(edge: ExportEdge): readonly ExportPoint[] {

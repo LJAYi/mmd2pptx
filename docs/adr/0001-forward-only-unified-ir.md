@@ -20,6 +20,7 @@ complete common AST.
 
 The IR stores canonical absolute path segments, stable semantic/source keys,
 computed stroke metadata, endpoint ownership when known, and source provenance.
+Visual edits are stored in a versioned layout sidecar keyed by stable IDs.
 
 For current Flowchart input, the FlowDB adapter supplies stable node and edge
 identity, endpoint ownership, parallel-edge order, and nested subgraphs. Direct
@@ -30,7 +31,7 @@ is structural so `@mmd2pptx/core` does not depend on Mermaid at runtime.
 All current format work is forward-only:
 
 ```text
-Mermaid
+Mermaid + optional layout sidecar
   -> Unified Diagram IR
   -> PPTX | SVG | draw.io | JSON Canvas
 ```
@@ -40,8 +41,8 @@ Reverse importers from PPTX, SVG, draw.io, or JSON Canvas are explicitly deferre
 ## Consequences
 
 - Exporters cannot introduce target-specific fields into the shared IR.
-- Renderer IDs may be retained for diagnostics, while stable semantic/source
-  keys remain available to forward exporters.
+- Renderer IDs may be retained for diagnostics, but layout persistence must use
+  semantic/source keys where available.
 - Flowchart source semantics are stronger when FlowDB is supplied; direct SVG
   and CLI identity remains limited by renderer metadata or unambiguous geometry.
 - FlowDB read failures, unsupported database shapes, missing elements, and
@@ -49,3 +50,4 @@ Reverse importers from PPTX, SVG, draw.io, or JSON Canvas are explicitly deferre
 - Unsupported features require explicit diagnostics and capability fallbacks.
 - PowerPoint `smart`, `faithful`, and `exact` modes can share geometry without
   forcing other exporters to understand DrawingML.
+- The visual editor edits layout overrides rather than rewriting Mermaid source.

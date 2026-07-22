@@ -19,7 +19,7 @@ slide.
 
 | Surface | Purpose |
 | --- | --- |
-| Web app | Paste Mermaid, preview it, and export locally to PPTX, SVG, draw.io, or JSON Canvas |
+| Web app | Paste Mermaid, adjust layout, and export locally to PPTX, SVG, draw.io, or JSON Canvas |
 | `@mmd2pptx/core` | Browser and Node SDK for parsing and diagnostic-aware forward exporters |
 | `mmd2pptx` | Main CLI for Mermaid-to-PPTX/SVG/draw.io/JSON Canvas conversion |
 | GitHub Pages | Hosts the static web app without receiving diagram source |
@@ -29,8 +29,12 @@ to leave the user's device.
 
 ## Web app
 
-Paste Mermaid or open a local `.mmd`/`.mermaid` file, inspect the live vector
-preview, and choose a supported forward export format.
+Paste Mermaid or open a local `.mmd`/`.mermaid` file. The adjustment workspace
+supports node drag/resize, multi-select, keyboard nudging, align/distribute,
+layer order, connection ports, obstacle-aware routing, edge-label placement,
+Bézier control handles, and visual Group/Ungroup. Undo/redo and an optional
+versioned layout sidecar preserve these edits without rewriting Mermaid source;
+stable nodes keep their overrides when the source changes.
 
 The preview viewer supports mouse or touch dragging, pointer-centered wheel
 zoom, 100% reset, fit-to-view, fit-to-width, an expanded view, and copying the
@@ -41,7 +45,7 @@ are applied outside the SVG, so changing the preview never changes PPTX output.
 For Flowcharts, the browser also merges Mermaid FlowDB node, edge, and nested
 subgraph identity with SVG geometry. If source semantics are unavailable, the
 same renderer-metadata and diagnosed geometry fallbacks used by direct SVG
-callers remain active. Diagram contents stay in the browser.
+callers remain active. Diagram contents and layout files stay in the browser.
 
 Install dependencies and start the development server:
 
