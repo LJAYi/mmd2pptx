@@ -6,6 +6,7 @@ import { drawioExporter } from "../../src/exporters/drawio.js";
 import { svgExporter } from "../../src/exporters/svg.js";
 import { parseMermaidSvg } from "../../src/parse-svg.js";
 import { diagramToPptxBuffer } from "../../src/pptx.js";
+import { nonZeroDashArray } from "../../src/stroke-style.js";
 import type { DiagramIR } from "../../src/types.js";
 
 describe("cross-exporter stroke consistency", () => {
@@ -103,6 +104,22 @@ describe("cross-exporter stroke consistency", () => {
     const zip = await JSZip.loadAsync(pptx.data);
     const slideXml = await zip.file("ppt/slides/slide1.xml")?.async("string") ?? "";
     expect(slideXml).not.toContain('<a:prstDash val="sysDot"/>');
+  });
+
+  it("rejects negative and non-finite public IR dash entries", () => {
+    expect(nonZeroDashArray([-1, 2])).toBeUndefined();
+    expect(nonZeroDashArray([Number.POSITIVE_INFINITY, 2])).toBeUndefined();
+    expect(nonZeroDashArray([Number.NaN, 2])).toBeUndefined();
+
+    for (const dashArray of [[-1, 2], [Number.POSITIVE_INFINITY, 2], [Number.NaN, 2]]) {
+      const diagram = publicDiagram();
+      diagram.edges[0]!.stroke!.dashArray = dashArray;
+      expect(sync(svgExporter.export(diagram)).data).not.toContain("stroke-dasharray");
+      const drawioStyle = drawioCell(sync(drawioExporter.export(diagram)).data, "edge")
+        ?.getAttribute("style") ?? "";
+      expect(drawioStyle).toContain("dashed=0");
+      expect(drawioStyle).not.toContain("dashPattern=");
+    }
   });
 });
 

@@ -5,6 +5,7 @@ export function nonZeroDashArray(
   values: readonly number[] | undefined,
 ): readonly number[] | undefined {
   if (!values || values.length === 0) return undefined;
+  if (values.some((value) => !Number.isFinite(value) || value < 0)) return undefined;
   return values.some((value) => value > 0) ? values : undefined;
 }
 
