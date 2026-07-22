@@ -102,6 +102,51 @@ test("supports pan, zoom, fit, expand, and copy without mutating the export SVG"
   await page.mouse.up();
   await expect.poll(async () => Number(await canvas.getAttribute("data-x"))).toBe(xBeforePan - 5);
 
+  const xBeforeMultiPointer = Number(await canvas.getAttribute("data-x"));
+  await viewport.evaluate((element) => {
+    const target = element as HTMLElement;
+    target.setPointerCapture = () => undefined;
+    target.hasPointerCapture = () => true;
+    target.releasePointerCapture = () => undefined;
+
+    target.dispatchEvent(new PointerEvent("pointerdown", {
+      bubbles: true,
+      button: 0,
+      buttons: 1,
+      clientX: 100,
+      clientY: 100,
+      pointerId: 41,
+      pointerType: "touch",
+    }));
+    target.dispatchEvent(new PointerEvent("pointerdown", {
+      bubbles: true,
+      button: 0,
+      buttons: 1,
+      clientX: 300,
+      clientY: 300,
+      pointerId: 42,
+      pointerType: "touch",
+    }));
+    target.dispatchEvent(new PointerEvent("pointermove", {
+      bubbles: true,
+      buttons: 1,
+      clientX: 120,
+      clientY: 100,
+      pointerId: 41,
+      pointerType: "touch",
+    }));
+    target.dispatchEvent(new PointerEvent("pointerup", {
+      bubbles: true,
+      button: 0,
+      clientX: 120,
+      clientY: 100,
+      pointerId: 41,
+      pointerType: "touch",
+    }));
+  });
+  await expect.poll(async () => Number(await canvas.getAttribute("data-x")))
+    .toBe(xBeforeMultiPointer + 20);
+
   await page.locator('[data-viewer-action="zoom-in"]').click();
   await page.locator('[data-viewer-action="fit"]').click();
   await expect(page.locator("#viewer-zoom")).not.toHaveText("120%");

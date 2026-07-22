@@ -178,7 +178,7 @@ export class SvgPanZoomViewer {
     }, { passive: false });
 
     this.viewport.addEventListener("pointerdown", (event) => {
-      if (!this.svg || event.button !== 0) return;
+      if (!this.svg || event.button !== 0 || this.pointer) return;
       this.mode = "manual";
       this.viewport.focus();
       this.pointer = { id: event.pointerId, x: event.clientX, y: event.clientY };
