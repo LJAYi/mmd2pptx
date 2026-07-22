@@ -1,32 +1,39 @@
 import { resolve } from "node:path";
 
 export type SlideLayout = "standard" | "wide";
+export type CliOutputFormat = "pptx" | "svg" | "drawio" | "json-canvas";
+export type PptxMode = "smart" | "faithful" | "exact";
 
 export interface CliOptions {
   backgroundColor?: string;
+  format: CliOutputFormat;
   help: boolean;
   inputPath?: string;
   layout: SlideLayout;
+  mode?: PptxMode;
   outputPath?: string;
 }
 
-export const HELP_TEXT = `mmd2pptx — convert Mermaid into an editable PowerPoint file
+export const HELP_TEXT = `mmd2pptx — export Mermaid to PPTX, SVG, draw.io, or JSON Canvas
 
 Usage:
   mmd2pptx <diagram.mmd|diagram.svg> [options]
 
 Options:
-  -o, --output <file>       Output .pptx path (default: beside the input)
+  -f, --format <format>     pptx, svg, drawio, or json-canvas (default: pptx)
+  -o, --output <file>       Output path (default: beside the input)
       --layout <layout>     Slide layout: wide or standard (default: wide)
-      --background <color>  Slide background color, for example #ffffff
+      --mode <mode>         PPTX mode: smart, faithful, or exact (default: smart)
+      --background <color>  Six-digit hex background, for example #ffffff
   -h, --help                Show this help
 
 Mermaid source (.mmd) is rendered in headless Chrome. Mermaid-generated SVG
-(.svg) uses the direct conversion path and does not launch a browser.
+(.svg) uses the direct conversion path and does not launch a browser. Default
+extensions are .pptx, .svg, .drawio, and .canvas respectively.
 `;
 
 export function parseCliArguments(argv: string[], cwd = process.cwd()): CliOptions {
-  const options: CliOptions = { help: false, layout: "wide" };
+  const options: CliOptions = { format: "pptx", help: false, layout: "wide" };
   const positionals: string[] = [];
 
   for (let index = 0; index < argv.length; index += 1) {
@@ -45,6 +52,17 @@ export function parseCliArguments(argv: string[], cwd = process.cwd()): CliOptio
       continue;
     }
 
+    if (argument === "-f" || argument === "--format") {
+      const value = requireValue(argv, ++index, argument);
+      if (!isOutputFormat(value)) {
+        throw new Error(
+          `Invalid format "${value}". Expected "pptx", "svg", "drawio", or "json-canvas".`,
+        );
+      }
+      options.format = value;
+      continue;
+    }
+
     if (argument === "--layout") {
       const value = requireValue(argv, ++index, argument);
       if (value !== "wide" && value !== "standard") {
@@ -54,8 +72,21 @@ export function parseCliArguments(argv: string[], cwd = process.cwd()): CliOptio
       continue;
     }
 
+    if (argument === "--mode") {
+      const value = requireValue(argv, ++index, argument);
+      if (value !== "smart" && value !== "faithful" && value !== "exact") {
+        throw new Error(`Invalid mode "${value}". Expected "smart", "faithful", or "exact".`);
+      }
+      options.mode = value;
+      continue;
+    }
+
     if (argument === "--background") {
-      options.backgroundColor = requireValue(argv, ++index, argument);
+      const value = requireValue(argv, ++index, argument);
+      if (!/^#[0-9A-Fa-f]{6}$/.test(value)) {
+        throw new Error(`Invalid background color "${value}". Expected #RRGGBB.`);
+      }
+      options.backgroundColor = value;
       continue;
     }
 
@@ -81,6 +112,11 @@ export function parseCliArguments(argv: string[], cwd = process.cwd()): CliOptio
   }
 
   return options;
+}
+
+function isOutputFormat(value: string): value is CliOutputFormat {
+  return value === "pptx" || value === "svg"
+    || value === "drawio" || value === "json-canvas";
 }
 
 function requireValue(argv: string[], index: number, option: string): string {

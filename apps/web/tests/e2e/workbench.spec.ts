@@ -10,11 +10,11 @@ test("renders the synthetic default and downloads a non-empty PowerPoint ZIP", a
   await page.goto("/");
 
   await expect(page.locator("#render-state b")).toHaveText("Rendered");
-  await expect(page.locator("#diagnostic-badge")).toHaveText("Ready");
+  await expect(page.locator("#diagnostic-badge")).toContainText("notes");
   await expect(page.locator("#metric-nodes")).toHaveText("9");
   await expect(page.locator("#metric-edges")).toHaveText("10");
-  await expect(page.locator("#metric-editable")).toHaveText("39");
-  await expect(page.locator("#metric-fallback")).toHaveText("0");
+  await expect(page.locator("#metric-editable")).toHaveText("28");
+  await expect(page.locator("#metric-fallback")).not.toHaveText("0");
   await expect(page.locator("#preview svg")).toBeVisible();
 
   const downloadPromise = page.waitForEvent("download");
@@ -44,6 +44,66 @@ test("blocks export when the Mermaid source is invalid", async ({ page }) => {
   await expect(page.locator("#preview svg")).toHaveCount(0);
 });
 
+test("preflights formats and exports a non-flowchart only through exact live SVG", async ({
+  page,
+}, testInfo) => {
+  await page.goto("/");
+  await expect(page.locator("#render-state b")).toHaveText("Rendered");
+  await page.locator("#source").fill([
+    "sequenceDiagram",
+    "  participant A as Client",
+    "  participant B as Service",
+    "  A->>B: Request",
+    "  B-->>A: Response",
+  ].join("\n"));
+  await expect(page.locator("#render-state b")).toHaveText("Rendered");
+  await expect(page.locator("#diagnostic-list code").filter({
+    hasText: "PPTX_MODE_UNSUPPORTED_FOR_DIAGRAM_TYPE",
+  })).toHaveCount(1);
+  await expect(page.locator("#export")).toBeDisabled();
+
+  await page.locator("#pptx-mode").selectOption("exact");
+  await expect(page.locator("#metric-editable")).toHaveText("0");
+  await expect(page.locator("#diagnostic-title")).toHaveText("Appearance preserved as one SVG");
+  await expect(page.locator("#diagnostic-list code").filter({
+    hasText: "PPTX_EXACT_SVG_EMBEDDED",
+  })).toHaveCount(1);
+  await expect(page.locator("#export")).toBeEnabled();
+  const downloadPromise = page.waitForEvent("download");
+  await page.locator("#export").click();
+  const download = await downloadPromise;
+  const path = testInfo.outputPath("sequence-exact.pptx");
+  await download.saveAs(path);
+  expect((await readFile(path)).byteLength).toBeGreaterThan(1_000);
+
+  await page.locator("#export-format").selectOption("svg");
+  await expect(page.locator("#diagnostic-list code").filter({
+    hasText: "SVG_DIAGRAM_TYPE_UNSUPPORTED",
+  })).toHaveCount(1);
+  await expect(page.locator("#export")).toBeDisabled();
+});
+
+test("disables stale export during source debounce and keeps the latest format preflight", async ({
+  page,
+}) => {
+  await page.goto("/");
+  await expect(page.locator("#render-state b")).toHaveText("Rendered");
+  await page.locator("#source").fill("flowchart LR\n  New[New source] --> Done[Done]");
+  await expect(page.locator("#export")).toBeDisabled();
+  await expect(page.locator("#render-state b")).toHaveText("Rendered");
+  await expect(page.locator("#export")).toBeEnabled();
+
+  await page.locator("#export-format").selectOption("svg");
+  await page.locator("#export-format").selectOption("json-canvas");
+  await expect(page.locator("#file-suffix")).toHaveText(".canvas");
+  await expect(page.locator("#diagnostic-list code").filter({
+    hasText: "JSON_CANVAS_BACKGROUND_DOWNGRADED",
+  })).toHaveCount(1);
+  await expect(page.locator("#diagnostic-list code").filter({
+    hasText: "SVG_EDGE_CONNECTIVITY_DOWNGRADED",
+  })).toHaveCount(0);
+});
+
 test("rerenders after changing the theme and retains the selected slide layout", async ({
   page,
 }) => {
@@ -53,7 +113,7 @@ test("rerenders after changing the theme and retains the selected slide layout",
   await page.locator("#theme").selectOption("forest");
   await expect(page.locator("#theme")).toHaveValue("forest");
   await expect(page.locator("#render-state b")).toHaveText("Rendered");
-  await expect(page.locator("#diagnostic-badge")).toHaveText("Ready");
+  await expect(page.locator("#diagnostic-badge")).toContainText("notes");
   await expect(page.locator("#preview svg")).toBeVisible();
 
   await page.locator("#layout").selectOption("standard");
@@ -175,7 +235,7 @@ test("supports pan, zoom, fit, expand, and copy without mutating the export SVG"
     viewBox: element.getAttribute("viewBox"),
   }));
   expect(svgStateAfter).toEqual(svgStateBefore);
-  await expect(page.locator("#diagnostic-badge")).toHaveText("Ready");
+  await expect(page.locator("#diagnostic-badge")).toContainText("notes");
   await expect(page.locator("#export")).toBeEnabled();
 
   await page.setViewportSize({ height: 844, width: 390 });

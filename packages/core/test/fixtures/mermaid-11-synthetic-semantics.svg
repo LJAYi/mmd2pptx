@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- mmd2pptx synthetic fixture: Mermaid 11.16-style flowchart semantics; no user data -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 420 260" aria-roledescription="flowchart-v2">
+  <style>
+    rect { fill: #eeeeee; stroke: #111111; }
+    .node rect { fill: #aabbcc; }
+    .node.special rect { stroke: #445566; }
+    g.nodes rect { stroke-width: 2; }
+    #node-a rect { fill: #112233; fill: var(--unsupported-color); }
+    .node > rect { opacity: 0.5; }
+  </style>
+  <defs>
+    <rect id="reused-shape" x="0" y="0" width="20" height="20"/>
+    <filter id="blur"><feGaussianBlur stdDeviation="2"/></filter>
+    <marker id="flowchart-pointEnd"><path d="M0,0 L10,5 L0,10 Z"/></marker>
+    <marker id="flowchart-crossEnd"><path d="M0,0 L10,10 M10,0 L0,10"/></marker>
+    <marker id="customEnd"><path d="M0,0 L10,10"/></marker>
+  </defs>
+  <use id="unexpanded-use" href="#reused-shape" x="390" y="10"/>
+  <g class="clusters">
+    <g class="cluster" id="group-outer" data-id="outer">
+      <rect x="10" y="10" width="360" height="220" rx="8" style="fill:#f8fafc;stroke:#64748b"/>
+      <g class="cluster-label"><text x="190" y="25" font-size="14">Outer group</text></g>
+    </g>
+    <g class="cluster" id="group-inner" data-id="inner">
+      <rect x="60" y="90" width="250" height="115" rx="6" style="fill:#ffffff;stroke:#94a3b8"/>
+      <g class="cluster-label"><text x="185" y="105" font-size="12">Inner group</text></g>
+    </g>
+  </g>
+  <g class="nodes">
+    <g class="node special" id="node-a" data-id="A">
+      <rect x="30" y="35" width="100" height="42" rx="4" style="fill:#abcdef"/>
+      <text x="80" y="56">Node A</text>
+    </g>
+    <g class="node" id="node-b" data-id="B">
+      <rect x="80" y="125" width="90" height="40" filter="url(#blur)"/>
+      <text x="125" y="145">Node B</text>
+    </g>
+    <g class="node" id="node-rotated" data-id="R" transform="rotate(8 250 55)">
+      <rect x="210" y="35" width="80" height="40"/>
+      <text x="250" y="55">Rotated</text>
+    </g>
+    <g class="node" id="node-unknown" data-id="U">
+      <path d="M210,125 C220,100 280,100 290,125 C280,175 220,175 210,125 Z"/>
+      <text x="250" y="140">Unknown path</text>
+    </g>
+  </g>
+  <g class="edgePaths">
+    <path class="flowchart-link" id="edge-known" data-source="A" data-target="B" d="M130,56 L150,56 L150,125" marker-end="url(#flowchart-pointEnd)"/>
+    <path class="flowchart-link" id="edge-cross" data-source="B" data-target="R" d="M170,145 L250,75" marker-end="url(#flowchart-crossEnd)"/>
+    <path class="flowchart-link" id="edge-custom" data-source="R" data-target="B" d="M210,55 L170,125" marker-start="url(#customEnd)"/>
+  </g>
+</svg>

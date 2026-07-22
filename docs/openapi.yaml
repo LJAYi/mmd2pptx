@@ -2,14 +2,14 @@ openapi: 3.1.0
 info:
   title: mmd2pptx API
   version: 1.0.0-draft
-  description: Convert Mermaid or SVG diagrams to editable PowerPoint files.
+  description: Draft forward-only API for converting Mermaid or SVG diagrams to PPTX, normalized SVG, draw.io, or JSON Canvas.
 servers:
   - url: https://api.example.com
 paths:
   /v1/convert:
     post:
       operationId: convertDiagram
-      summary: Convert a Mermaid or SVG diagram to PPTX
+      summary: Convert a Mermaid or SVG diagram to a forward output format
       requestBody:
         required: true
         content:
@@ -18,7 +18,7 @@ paths:
               $ref: "#/components/schemas/ConvertRequest"
       responses:
         "200":
-          description: Editable PowerPoint presentation
+          description: Converted artifact in the requested format
           headers:
             X-mmd2pptx-Diagnostics:
               description: Base64url-encoded compact diagnostic summary.
@@ -29,6 +29,15 @@ paths:
               schema:
                 type: string
                 contentEncoding: base64
+            image/svg+xml:
+              schema:
+                type: string
+            application/vnd.jgraph.mxfile:
+              schema:
+                type: string
+            application/json:
+              schema:
+                type: object
         "400":
           description: Invalid Mermaid, SVG, or options
           content:
@@ -54,6 +63,15 @@ components:
         input:
           type: string
           enum: [mermaid, svg]
+        format:
+          type: string
+          enum: [pptx, svg, drawio, json-canvas]
+          default: pptx
+        mode:
+          type: string
+          description: Applies only when format is pptx.
+          enum: [smart, faithful, exact]
+          default: smart
         layout:
           type: string
           enum: [wide, standard]

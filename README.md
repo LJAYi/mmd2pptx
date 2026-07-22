@@ -1,6 +1,7 @@
 # mmd2pptx
 
-Turn Mermaid diagrams into editable PowerPoint slides.
+Export Mermaid diagrams to editable PowerPoint, normalized SVG, draw.io, and
+JSON Canvas files.
 
 **Live demo:** [ljayi.github.io/mmd2pptx](https://ljayi.github.io/mmd2pptx/)
 
@@ -18,9 +19,9 @@ slide.
 
 | Surface | Purpose |
 | --- | --- |
-| Web app | Paste Mermaid, preview it, and download a PPTX locally in the browser |
-| `@mmd2pptx/core` | Browser and Node SDK for SVG parsing and PowerPoint generation |
-| `mmd2pptx` | Main CLI for converting `.mmd` source or Mermaid-generated `.svg` |
+| Web app | Paste Mermaid, adjust layout, and export locally to PPTX, SVG, draw.io, or JSON Canvas |
+| `@mmd2pptx/core` | Browser and Node SDK for parsing and diagnostic-aware forward exporters |
+| `mmd2pptx` | Main CLI for Mermaid-to-PPTX/SVG/draw.io/JSON Canvas conversion |
 | GitHub Pages | Hosts the static web app without receiving diagram source |
 
 The static app and SDK perform conversion locally. Diagram contents do not need
@@ -28,11 +29,23 @@ to leave the user's device.
 
 ## Web app
 
+Paste Mermaid or open a local `.mmd`/`.mermaid` file. The adjustment workspace
+supports node drag/resize, multi-select, keyboard nudging, align/distribute,
+layer order, connection ports, obstacle-aware routing, edge-label placement,
+Bézier control handles, and visual Group/Ungroup. Undo/redo and an optional
+versioned layout sidecar preserve these edits without rewriting Mermaid source;
+stable nodes keep their overrides when the source changes.
+
 The preview viewer supports mouse or touch dragging, pointer-centered wheel
 zoom, 100% reset, fit-to-view, fit-to-width, an expanded view, and copying the
 Mermaid source or rendered SVG. Keyboard users can pan with the arrow keys and
 use `+`, `-`, `0`, `F`, or `W` for the matching view actions. Viewer transforms
 are applied outside the SVG, so changing the preview never changes PPTX output.
+
+For Flowcharts, the browser also merges Mermaid FlowDB node, edge, and nested
+subgraph identity with SVG geometry. If source semantics are unavailable, the
+same renderer-metadata and diagnosed geometry fallbacks used by direct SVG
+callers remain active. Diagram contents and layout files stay in the browser.
 
 Install dependencies and start the development server:
 
@@ -60,8 +73,9 @@ Install the public core package:
 npm install @mmd2pptx/core
 ```
 
-The core package separates SVG parsing from PowerPoint generation so callers can
-render Mermaid with their preferred version and security settings:
+The core package separates SVG parsing from every target exporter so callers
+can render Mermaid with their preferred version and security settings, then
+reuse one Diagram IR across PPTX, SVG, draw.io, and JSON Canvas:
 
 ```ts
 import {
@@ -80,6 +94,7 @@ if (parsed.diagnostics.some(({ severity }) => severity === "error")) {
 const result = await diagramToPptxBlob(parsed.data, {
   layout: "wide",
   backgroundColor: "#ffffff",
+  mode: "smart",
 });
 
 console.log(result.summary, result.diagnostics);
@@ -87,6 +102,32 @@ console.log(result.summary, result.diagnostics);
 ```
 
 The browser app adds the Mermaid-source-to-SVG step on top of this API.
+
+The same parsed IR can be sent to the other forward exporters. Each wrapper
+returns deterministic data, diagnostics, and an object summary:
+
+```ts
+import {
+  drawioExporter,
+  jsonCanvasExporter,
+  svgExporter,
+} from "@mmd2pptx/core";
+
+const svgResult = await svgExporter.export(parsed.data);
+const drawioResult = await drawioExporter.export(parsed.data);
+const canvasResult = await jsonCanvasExporter.export(parsed.data);
+```
+
+See the generated [export compatibility matrix](docs/compatibility.md) for
+native, fallback, and unsupported capabilities. The current scope is strictly
+Mermaid/Diagram IR to target formats; reverse import is intentionally deferred.
+
+| Output | Current Flowchart level | Main tradeoff |
+| --- | --- | --- |
+| PPTX | Smart | Native connectors where supported, with faithful/exact fallback; exact embeds sanitized source SVG when that source is available |
+| SVG | Editable | Vector objects; no portable node-attachment semantics |
+| draw.io | Editable | Resolved endpoints stay connected; unresolved endpoints are diagnosed and remain detached; complex curves become waypoints |
+| JSON Canvas | Hybrid | Cards and connectivity; rich visual styling is diagnosed |
 
 For Node, the convenience API accepts an SVG string without requiring a DOM:
 
@@ -107,10 +148,14 @@ SVG:
 ```bash
 npm install --global mmd2pptx
 mmd2pptx diagram.mmd --output diagram.pptx
+mmd2pptx diagram.mmd --mode faithful --output diagram.pptx
 mmd2pptx diagram.svg \
   --output diagram.pptx \
   --layout wide \
   --background '#ffffff'
+mmd2pptx diagram.mmd --format svg --output diagram.svg
+mmd2pptx diagram.mmd --format drawio --output diagram.drawio
+mmd2pptx diagram.mmd --format json-canvas --output diagram.canvas
 ```
 
 Run `mmd2pptx --help` for all options. `.mmd` conversion launches headless
@@ -121,14 +166,17 @@ installation-size details.
 
 ## Flowchart support
 
-| Feature | v0.2.3 behavior |
+| Feature | Current behavior |
 | --- | --- |
 | Node shapes | Rectangles, rounded/stadium, ellipse, diamond, hexagon, parallelogram, trapezoid, cylinder |
-| Connectors | Editable straight segments with bends, solid/dashed/dotted styles, common start/end markers |
+| Smart PPTX | Straight, elbow, and simple curved native connectors with node bindings; complex paths fall back per edge |
+| Faithful PPTX | One open editable Freeform per supported path, preserving continuous dash and arrow styling |
+| Exact PPTX | One embedded SVG vector object: sanitized original SVG for source/string workflows, or normalized IR SVG for IR-only workflows |
 | Edge labels | Editable text from SVG text or Mermaid HTML labels |
-| Transforms | Nested matrix, translate, scale, rotate, and skew |
-| Curves | Approximated as editable straight segments between path command endpoints |
-| Unsupported SVG | Reported through diagnostics; filters, arbitrary paths, clusters, and some CSS are not exact |
+| Transforms | Nested matrix, translate, and scale; rotated/skewed nodes use a diagnosed axis-aligned-bounds fallback |
+| Curves | Canonical line, cubic, quadratic, and axis-aligned arc geometry is preserved; unsupported cases are diagnosed |
+| Other formats | Deterministic normalized SVG, draw.io graphs with diagnosed endpoint resolution, and JSON Canvas cards/edges |
+| SVG semantics | Deterministic tag/class/id/descendant CSS cascade and editable flowchart subgraphs; unsupported selectors, variables, filters, `<use>`, and unknown shapes/markers are diagnosed |
 
 ## HTTP API and GitHub Pages
 

@@ -1,7 +1,7 @@
 # `mmd2pptx`
 
-Convert Mermaid source or Mermaid-generated SVG into an editable PowerPoint
-presentation.
+Export Mermaid source or Mermaid-generated SVG to editable PowerPoint,
+normalized SVG, draw.io, or JSON Canvas. Conversion is forward-only.
 
 ## Install
 
@@ -16,6 +16,7 @@ Node.js 20 or newer.
 
 ```bash
 mmd2pptx architecture.mmd --output architecture.pptx
+mmd2pptx architecture.mmd --mode faithful --output architecture.pptx
 ```
 
 `.mmd` files are rendered to SVG with the package-local Mermaid CLI and
@@ -32,7 +33,20 @@ mmd2pptx architecture.svg \
 ```
 
 The `.svg` path does not launch a browser, so it remains the fastest and
-lightest runtime path. Run `mmd2pptx --help` for complete usage.
+lightest runtime path. PPTX supports `--mode smart` (default), `faithful`, and
+`exact`. Run `mmd2pptx --help` for complete usage.
+
+PPTX remains the default. Use `--format` for the other forward-only exports:
+
+```bash
+mmd2pptx architecture.mmd --format svg --output architecture.svg
+mmd2pptx architecture.mmd --format drawio --output architecture.drawio
+mmd2pptx architecture.mmd --format json-canvas --output architecture.canvas
+```
+
+If `--output` is omitted, the CLI selects `.pptx`, `.svg`, `.drawio`, or
+`.canvas` from the requested format. Normalizing an existing `.svg` writes
+`<name>.normalized.svg` by default so the source is not overwritten.
 
 ## Browser runtime
 

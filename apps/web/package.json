@@ -7,18 +7,20 @@
     "dev": "vite",
     "build": "tsc --noEmit -p tsconfig.json && vite build",
     "check": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.e2e.json",
+    "test": "vitest run tests/layout",
     "e2e": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.e2e.json && vite build && playwright test",
     "e2e:install": "playwright install chromium",
     "preview": "vite preview"
   },
   "dependencies": {
     "@mmd2pptx/core": "workspace:*",
-    "mermaid": "^11.10.1"
+    "mermaid": "^11.16.0"
   },
   "devDependencies": {
     "@playwright/test": "^1.55.0",
     "@types/node": "^22.15.0",
     "typescript": "^5.9.3",
-    "vite": "^7.0.6"
+    "vite": "^7.0.6",
+    "vitest": "^3.2.7"
   }
 }
