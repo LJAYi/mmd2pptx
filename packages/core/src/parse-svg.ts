@@ -1,16 +1,25 @@
 import { DOMParser } from "@xmldom/xmldom";
 
+import {
+  diagramPathPoints,
+  parseSvgPathData,
+  transformDiagramPath,
+} from "./diagram-ir/path.js";
 import { normalizeFontFamily } from "./normalize-font-family.js";
+import { mergeMermaidSemantics } from "./source-mapping/merge.js";
+import type { MermaidSemanticGraph } from "./source-mapping/types.js";
 import type {
   Bounds,
   ConversionDiagnostic,
   ConversionResult,
   DiagramArrowKind,
   DiagramEdge,
+  DiagramGroup,
   DiagramIR,
   DiagramLineDash,
   DiagramNode,
   DiagramNodeKind,
+  DiagramStrokeStyle,
   DiagramText,
   Point,
 } from "./types.js";
@@ -34,7 +43,44 @@ interface AffineMatrix {
   f: number;
 }
 
-export function parseMermaidSvg(svg: string): ConversionResult<DiagramIR> {
+interface CssDeclaration {
+  important: boolean;
+  name: string;
+  value: string;
+}
+
+interface CssRule {
+  declarations: CssDeclaration[];
+  selector: CssSelector;
+  sourceOrder: number;
+}
+
+interface CssSelector {
+  parts: CssSelectorPart[];
+  specificity: number;
+}
+
+interface CssSelectorPart {
+  classes: string[];
+  id?: string;
+  tag?: string;
+}
+
+interface CssContext {
+  rules: CssRule[];
+}
+
+const CSS_CONTEXTS = new WeakMap<Document, CssContext>();
+
+export interface ParseMermaidSvgOptions {
+  /** Optional semantics obtained from Mermaid FlowDB; SVG geometry/styles remain authoritative. */
+  semantics?: MermaidSemanticGraph;
+}
+
+export function parseMermaidSvg(
+  svg: string,
+  options: ParseMermaidSvgOptions = {},
+): ConversionResult<DiagramIR> {
   const parseMessages: string[] = [];
   const document = new DOMParser({
     errorHandler: {
@@ -52,16 +98,20 @@ export function parseMermaidSvg(svg: string): ConversionResult<DiagramIR> {
     );
   }
 
-  return parseSvgRoot(root as unknown as SvgElementLike);
+  return parseSvgRoot(root as unknown as SvgElementLike, options);
 }
 
 export function parseMermaidSvgElement(
   svg: SVGSVGElement,
+  options: ParseMermaidSvgOptions = {},
 ): ConversionResult<DiagramIR> {
-  return parseSvgRoot(svg as unknown as SvgElementLike);
+  return parseSvgRoot(svg as unknown as SvgElementLike, options);
 }
 
-function parseSvgRoot(root: SvgElementLike): ConversionResult<DiagramIR> {
+function parseSvgRoot(
+  root: SvgElementLike,
+  options: ParseMermaidSvgOptions,
+): ConversionResult<DiagramIR> {
   const diagnostics: ConversionDiagnostic[] = [];
   const viewBox = readViewBox(root);
   if (!viewBox) {
@@ -71,8 +121,22 @@ function parseSvgRoot(root: SvgElementLike): ConversionResult<DiagramIR> {
     );
   }
 
+  const ownerDocument = root.ownerDocument;
+  if (ownerDocument) {
+    CSS_CONTEXTS.set(ownerDocument, buildCssContext(root, diagnostics));
+  }
+  reportUnsupportedSvgFeatures(root, diagnostics);
+
+  const groups = parseGroups(root, viewBox, diagnostics);
+  assignGroupParents(groups, diagnostics);
   const nodes = parseNodes(root, viewBox, diagnostics);
-  const edges = parseEdges(root, viewBox, diagnostics);
+  assignNodeGroups(nodes, groups, diagnostics);
+  const edges = parseEdges(root, viewBox, nodes, diagnostics);
+  diagnostics.push(
+    ...duplicateIdDiagnostics(groups, "group"),
+    ...duplicateIdDiagnostics(nodes, "node"),
+    ...duplicateIdDiagnostics(edges, "edge"),
+  );
   if (nodes.length === 0) {
     diagnostics.push({
       code: "NO_MERMAID_NODES",
@@ -81,23 +145,215 @@ function parseSvgRoot(root: SvgElementLike): ConversionResult<DiagramIR> {
     });
   }
 
-  const diagram: DiagramIR = {
+  const diagramType = mermaidDiagramType(root);
+  let diagram: DiagramIR = {
     edges,
+    ...(groups.length > 0 ? { groups } : {}),
     height: viewBox.height,
     nodes,
+    schemaVersion: "1.0",
+    source: {
+      kind: "mermaid",
+      ...(diagramType ? { diagramType } : {}),
+    },
     width: viewBox.width,
   };
+
+  if (options.semantics) {
+    const merged = mergeMermaidSemantics(diagram, options.semantics);
+    diagram = merged.data;
+    diagnostics.push(...merged.diagnostics);
+  }
 
   return {
     data: diagram,
     diagnostics,
     summary: {
-      editableObjects: editableObjectCount(nodes, edges),
+      editableObjects: editableObjectCount(nodes, edges) + groups.length,
       edges: edges.length,
-      fallbackObjects: 0,
+      fallbackObjects: new Set(
+        diagnostics
+          .filter(({ severity, elementId }) => severity === "warning" && elementId)
+          .map(({ elementId }) => elementId!),
+      ).size,
       nodes: nodes.length,
     },
   };
+}
+
+function duplicateIdDiagnostics(
+  values: readonly { id: string }[],
+  kind: "node" | "edge" | "group",
+): ConversionDiagnostic[] {
+  const seen = new Set<string>();
+  const duplicates = new Set<string>();
+  for (const { id } of values) {
+    if (seen.has(id)) duplicates.add(id);
+    seen.add(id);
+  }
+  return [...duplicates].map((id) => ({
+    code: `DUPLICATE_${kind.toUpperCase()}_ID`,
+    elementId: id,
+    message: `Mermaid SVG contains more than one ${kind} with id '${id}'.`,
+    severity: "error" as const,
+  }));
+}
+
+function mermaidDiagramType(root: Element): string | undefined {
+  const role = root.getAttribute("aria-roledescription")?.trim();
+  if (role) return role === "flowchart-v2" ? "flowchart" : role;
+  const known = (root.getAttribute("class") ?? "")
+    .split(/\s+/)
+    .find((token) => token === "flowchart" || token.endsWith("Diagram"));
+  return known || undefined;
+}
+
+const GROUP_IDS = new WeakMap<Element, string>();
+
+function parseGroups(
+  root: SvgElementLike,
+  viewBox: ViewBox,
+  diagnostics: ConversionDiagnostic[],
+): DiagramGroup[] {
+  const elements = Array.from(root.getElementsByTagName("g"))
+    .filter((group) => hasClass(group, "cluster"));
+  elements.forEach((group, index) => {
+    GROUP_IDS.set(group, group.getAttribute("id") || group.getAttribute("data-id") || `group-${index + 1}`);
+  });
+
+  const groups: DiagramGroup[] = [];
+  for (const element of elements) {
+    const id = GROUP_IDS.get(element)!;
+    const shape = firstClusterShape(element);
+    if (!shape) {
+      diagnostics.push({
+        code: "GROUP_SHAPE_UNSUPPORTED",
+        elementId: id,
+        message: "A Mermaid subgraph had no supported container outline.",
+        severity: "warning",
+      });
+      continue;
+    }
+    const transform = accumulatedTransform(shape);
+    const geometry = shapeGeometry(shape, transform, viewBox);
+    if (!geometry) {
+      diagnostics.push({
+        code: "GROUP_GEOMETRY_INVALID",
+        elementId: id,
+        message: "A Mermaid subgraph container had invalid dimensions.",
+        severity: "warning",
+      });
+      continue;
+    }
+    const style = readShapeStyle(shape);
+    const parentId = nearestClusterId(element.parentNode);
+    const semanticId = element.getAttribute("data-id") || undefined;
+    const text = readClusterText(element, geometry.bounds, viewBox);
+    groups.push({
+      bounds: geometry.bounds,
+      id,
+      ...(parentId ? { parentId } : {}),
+      ...(semanticId ? { semanticId, sourceKey: semanticId } : { sourceKey: id }),
+      sourceRef: { elementId: id, kind: "group" },
+      ...(style.fill ? { fill: style.fill } : {}),
+      ...(style.stroke ? { stroke: style.stroke } : {}),
+      ...(style.strokeWidth !== undefined ? { strokeWidth: style.strokeWidth } : {}),
+      ...(text ? { text } : {}),
+    });
+  }
+  return groups;
+}
+
+function firstClusterShape(group: Element): Element | undefined {
+  return Array.from(group.childNodes)
+    .filter((node): node is Element => node.nodeType === 1)
+    .find((element) => isSupportedShape(element) && hasPositiveGeometry(element));
+}
+
+function nearestClusterId(node: Node | null): string | undefined {
+  let current = node;
+  while (current?.nodeType === 1) {
+    const element = current as Element;
+    if (hasClass(element, "cluster")) return GROUP_IDS.get(element);
+    current = current.parentNode;
+  }
+  return undefined;
+}
+
+function readClusterText(
+  group: Element,
+  fallbackBounds: Bounds,
+  viewBox: ViewBox,
+): DiagramText | undefined {
+  const label = Array.from(group.getElementsByTagName("g"))
+    .find((candidate) => hasClass(candidate, "cluster-label")
+      && nearestClusterId(candidate.parentNode) === GROUP_IDS.get(group));
+  if (!label) return undefined;
+  const source = label.getElementsByTagName("foreignObject")[0]
+    ?? label.getElementsByTagName("text")[0];
+  if (!source) return undefined;
+  return readTextElement(source, textElementBounds(source, viewBox) ?? fallbackBounds);
+}
+
+function assignGroupParents(
+  groups: DiagramGroup[],
+  diagnostics: ConversionDiagnostic[],
+): void {
+  for (const group of groups) {
+    if (group.parentId) continue;
+    const candidates = groups
+      .filter((candidate) => candidate.id !== group.id
+        && boundsContain(candidate.bounds, group.bounds))
+      .sort((left, right) => boundsArea(left.bounds) - boundsArea(right.bounds));
+    assignContainingParent(group, candidates, "GROUP_PARENT_AMBIGUOUS", diagnostics);
+  }
+}
+
+function assignNodeGroups(
+  nodes: DiagramNode[],
+  groups: readonly DiagramGroup[],
+  diagnostics: ConversionDiagnostic[],
+): void {
+  for (const node of nodes) {
+    if (node.parentId) continue;
+    const candidates = groups
+      .filter((group) => boundsContain(group.bounds, node.bounds))
+      .sort((left, right) => boundsArea(left.bounds) - boundsArea(right.bounds));
+    assignContainingParent(node, candidates, "NODE_GROUP_AMBIGUOUS", diagnostics);
+  }
+}
+
+function assignContainingParent(
+  child: DiagramNode | DiagramGroup,
+  candidates: readonly DiagramGroup[],
+  diagnosticCode: string,
+  diagnostics: ConversionDiagnostic[],
+): void {
+  const best = candidates[0];
+  if (!best) return;
+  const next = candidates[1];
+  if (next && Math.abs(boundsArea(best.bounds) - boundsArea(next.bounds)) < 0.0001) {
+    diagnostics.push({
+      code: diagnosticCode,
+      elementId: child.id,
+      message: "More than one subgraph equally contains this element; parent ownership was left unset.",
+      severity: "warning",
+    });
+    return;
+  }
+  child.parentId = best.semanticId ?? best.sourceKey ?? best.id;
+}
+
+function boundsContain(outer: Bounds, inner: Bounds): boolean {
+  const epsilon = 0.001;
+  return inner.x >= outer.x - epsilon
+    && inner.y >= outer.y - epsilon
+    && inner.x + inner.width <= outer.x + outer.width + epsilon
+    && inner.y + inner.height <= outer.y + outer.height + epsilon;
+}
+
+function boundsArea(bounds: Bounds): number {
+  return bounds.width * bounds.height;
 }
 
 function parseNodes(
@@ -126,9 +382,31 @@ function parseNodes(
       continue;
     }
 
+    if (shape.tagName.toLowerCase() === "path"
+      && !semanticNodeKind(shape)
+      && !hasSelfOrAncestorClass(shape, "outer-path", group)) {
+      const elementId = group.getAttribute("id") || undefined;
+      diagnostics.push({
+        code: "NODE_PATH_SHAPE_UNSUPPORTED",
+        message: "A path-based Mermaid node had no recognized shape semantics and was omitted.",
+        severity: "warning",
+        ...(elementId ? { elementId } : {}),
+      });
+      continue;
+    }
+
     // Start at the selected outline so Mermaid v11 shape- and wrapper-level
     // transforms are composed together with the ancestor node transform.
     const transform = accumulatedTransform(shape);
+    if (!isAxisAlignedTransform(transform)) {
+      const elementId = group.getAttribute("id") || undefined;
+      diagnostics.push({
+        code: "NODE_TRANSFORM_DOWNGRADED",
+        message: "A rotated or skewed node outline was reduced to an axis-aligned bounding box.",
+        severity: "warning",
+        ...(elementId ? { elementId } : {}),
+      });
+    }
     const geometry = shapeGeometry(shape, transform, viewBox);
     if (!geometry) {
       const elementId = group.getAttribute("id");
@@ -143,11 +421,16 @@ function parseNodes(
 
     const style = readShapeStyle(shape);
     const text = readNodeText(groupElement, geometry.bounds);
-    const id = group.getAttribute("id") ?? `node-${nodes.length + 1}`;
+    const id = group.getAttribute("id") || `node-${nodes.length + 1}`;
+    const semanticId = group.getAttribute("data-id") || semanticNodeId(id);
+    const parentId = nearestClusterId(group.parentNode);
     nodes.push({
       bounds: geometry.bounds,
       id,
       kind: geometry.kind,
+      ...(parentId ? { parentId } : {}),
+      ...(semanticId ? { semanticId, sourceKey: semanticId } : { sourceKey: id }),
+      sourceRef: { elementId: id, kind: "node" },
       ...(style.fill ? { fill: style.fill } : {}),
       ...(style.stroke ? { stroke: style.stroke } : {}),
       ...(style.strokeWidth !== undefined ? { strokeWidth: style.strokeWidth } : {}),
@@ -161,6 +444,7 @@ function parseNodes(
 function parseEdges(
   root: SvgElementLike,
   viewBox: ViewBox,
+  nodes: readonly DiagramNode[],
   diagnostics: ConversionDiagnostic[],
 ): DiagramEdge[] {
   const paths = Array.from(root.getElementsByTagName("path"));
@@ -171,41 +455,65 @@ function parseEdges(
       continue;
     }
 
-    const localPoints = pathPoints(path.getAttribute("d"));
-    if (localPoints.length < 2) {
+    const pathData = path.getAttribute("d");
+    let canonicalPath;
+    try {
+      const transform = accumulatedTransform(path);
+      const sourcePath = parseSvgPathData(pathData ?? "");
+      if (sourcePath.segments.some(({ kind }) => kind === "arc") && hasShear(transform)) {
+        const elementId = path.getAttribute("id");
+        diagnostics.push({
+          code: "EDGE_ARC_TRANSFORM_APPROXIMATED",
+          message: "An SVG arc uses a skewed transform; its canonical radii are approximated.",
+          severity: "warning",
+          ...(elementId ? { elementId } : {}),
+        });
+      }
+      canonicalPath = transformDiagramPath(sourcePath, {
+        ...transform,
+        e: transform.e - viewBox.minX,
+        f: transform.f - viewBox.minY,
+      });
+    } catch {
       const elementId = path.getAttribute("id");
       diagnostics.push({
         code: "EDGE_PATH_UNSUPPORTED",
-        message: "An edge path could not be reduced to editable endpoints.",
+        message: "An edge path could not be normalized into canonical geometry.",
         severity: "warning",
         ...(elementId ? { elementId } : {}),
       });
       continue;
     }
 
-    const transform = accumulatedTransform(path);
-    const points = dedupePoints(localPoints.map((point) =>
-      normalizePoint(applyMatrix(transform, point), viewBox)));
+    const points = dedupePoints(diagramPathPoints(canonicalPath));
     if (points.length < 2) {
       continue;
     }
 
+    const id = path.getAttribute("id") || `edge-${edges.length + 1}`;
     const style = readShapeStyle(path);
     const dash = edgeDash(path);
-    const startArrow = markerArrow(path, "start");
-    const endArrow = markerArrow(path, "end");
-    const id = path.getAttribute("id") ?? `edge-${edges.length + 1}`;
+    const startArrow = markerArrow(path, "start", id, diagnostics);
+    const endArrow = markerArrow(path, "end", id, diagnostics);
+    const stroke = edgeStrokeStyle(path, style);
     const start = points[0];
     const end = points.at(-1);
     if (!start || !end) {
       continue;
     }
+    const endpoints = semanticEndpoints(path, nodes, start, end);
     edges.push({
       color: style.stroke ?? "333333",
       end,
       id,
+      path: canonicalPath,
       points,
+      sourceKey: path.getAttribute("data-id") || id,
+      sourceRef: { elementId: id, kind: "edge" },
       start,
+      stroke,
+      ...(endpoints.sourceId ? { sourceId: endpoints.sourceId } : {}),
+      ...(endpoints.targetId ? { targetId: endpoints.targetId } : {}),
       ...(dash !== "solid" ? { dash } : {}),
       ...(startArrow !== "none" ? { startArrow } : {}),
       ...(endArrow !== "none" ? { endArrow } : {}),
@@ -215,6 +523,20 @@ function parseEdges(
 
   attachEdgeLabels(root, edges, viewBox);
   return edges;
+}
+
+function hasShear(transform: AffineMatrix): boolean {
+  const scale = Math.max(
+    Math.hypot(transform.a, transform.b) * Math.hypot(transform.c, transform.d),
+    1,
+  );
+  return Math.abs(transform.a * transform.c + transform.b * transform.d) > scale * 0.000001;
+}
+
+function isAxisAlignedTransform(transform: AffineMatrix): boolean {
+  const scale = Math.max(Math.abs(transform.a), Math.abs(transform.d), 1);
+  return Math.abs(transform.b) <= scale * 0.000001
+    && Math.abs(transform.c) <= scale * 0.000001;
 }
 
 function attachEdgeLabels(
@@ -368,7 +690,7 @@ function readTextElement(source: Element, bounds: Bounds): DiagramText | undefin
   }
   const fontFamily = normalizeFontFamily(style.get("font-family"));
   const fontSize = parseCssNumber(style.get("font-size"));
-  const color = normalizeColor(style.get("color") ?? style.get("fill"));
+  const color = normalizeStyleColor(style.get("color") ?? style.get("fill"), style);
   return {
     bounds,
     text,
@@ -411,8 +733,8 @@ function readShapeStyle(element: Element): {
   strokeWidth?: number;
 } {
   const style = readStyle(element);
-  const fill = normalizeColor(style.get("fill"));
-  const stroke = normalizeColor(style.get("stroke"));
+  const fill = normalizeStyleColor(style.get("fill"), style);
+  const stroke = normalizeStyleColor(style.get("stroke"), style);
   const strokeWidth = parseCssNumber(style.get("stroke-width"));
   return {
     ...(fill ? { fill } : {}),
@@ -421,51 +743,273 @@ function readShapeStyle(element: Element): {
   };
 }
 
-function readStyle(element: Element): Map<string, string> {
+const STYLE_NAMES = new Set([
+  "color",
+  "fill",
+  "filter",
+  "font-family",
+  "font-size",
+  "marker-end",
+  "marker-start",
+  "opacity",
+  "stroke",
+  "stroke-dasharray",
+  "stroke-dashoffset",
+  "stroke-linecap",
+  "stroke-linejoin",
+  "stroke-opacity",
+  "stroke-width",
+  "text-anchor",
+]);
+
+const INHERITED_STYLE_NAMES = [
+  "color",
+  "fill",
+  "font-family",
+  "font-size",
+  "marker-end",
+  "marker-start",
+  "stroke",
+  "stroke-dasharray",
+  "stroke-dashoffset",
+  "stroke-linecap",
+  "stroke-linejoin",
+  "stroke-opacity",
+  "stroke-width",
+] as const;
+
+function buildCssContext(
+  root: SvgElementLike,
+  diagnostics: ConversionDiagnostic[],
+): CssContext {
+  const rules: CssRule[] = [];
+  let sourceOrder = 0;
+  for (const [styleIndex, element] of Array.from(root.getElementsByTagName("style")).entries()) {
+    const css = (element.textContent ?? "").replace(/\/\*[\s\S]*?\*\//g, "");
+    const rulePattern = /([^{}]+)\{([^{}]*)\}/g;
+    let consumed = "";
+    for (const match of css.matchAll(rulePattern)) {
+      consumed += match[0];
+      const declarationText = match[2] ?? "";
+      const declarations: CssDeclaration[] = [];
+      for (const raw of declarationText.split(";")) {
+        if (!raw.trim()) continue;
+        const separator = raw.indexOf(":");
+        if (separator <= 0) {
+          diagnostics.push(cssDiagnostic(
+            "SVG_CSS_RULE_UNSUPPORTED",
+            element,
+            styleIndex,
+            `CSS declaration '${raw.trim()}' could not be parsed and was ignored.`,
+          ));
+          continue;
+        }
+        const name = raw.slice(0, separator).trim().toLowerCase();
+        const priority = cssPriority(raw.slice(separator + 1).trim());
+        const value = priority.value;
+        if (!STYLE_NAMES.has(name)) continue;
+        if (/var\s*\(/i.test(value)) {
+          diagnostics.push(cssDiagnostic(
+            "SVG_CSS_VARIABLE_UNSUPPORTED",
+            element,
+            styleIndex,
+            `CSS variable value '${value}' could not be resolved deterministically and was ignored.`,
+          ));
+          continue;
+        }
+        declarations.push({ important: priority.important, name, value });
+      }
+      for (const rawSelector of (match[1] ?? "").split(",")) {
+        const selector = parseCssSelector(rawSelector.trim());
+        if (!selector) {
+          diagnostics.push(cssDiagnostic(
+            "SVG_CSS_SELECTOR_UNSUPPORTED",
+            element,
+            styleIndex,
+            `CSS selector '${rawSelector.trim()}' is outside the supported tag/class/id descendant subset.`,
+          ));
+          continue;
+        }
+        rules.push({ declarations, selector, sourceOrder });
+        sourceOrder += 1;
+      }
+    }
+    const remainder = css.replace(rulePattern, "").trim();
+    if (remainder || (css.trim() && !consumed)) {
+      diagnostics.push(cssDiagnostic(
+        "SVG_CSS_RULE_UNSUPPORTED",
+        element,
+        styleIndex,
+        "A CSS rule could not be parsed and was ignored.",
+      ));
+    }
+  }
+  return { rules };
+}
+
+function cssDiagnostic(
+  code: string,
+  element: Element,
+  index: number,
+  message: string,
+): ConversionDiagnostic {
+  return {
+    code,
+    elementId: element.getAttribute("id") || `style-${index + 1}`,
+    message,
+    severity: "warning",
+  };
+}
+
+function parseCssSelector(value: string): CssSelector | undefined {
+  if (!value || /[>+~:\[\]*]/.test(value)) return undefined;
+  const tokens = value.split(/\s+/);
+  const parts: CssSelectorPart[] = [];
+  let specificity = 0;
+  for (const token of tokens) {
+    if (!/^(?:[A-Za-z][\w-]*)?(?:[.#][\w-]+)*$/.test(token)) return undefined;
+    const tag = /^[A-Za-z][\w-]*/.exec(token)?.[0]?.toLowerCase();
+    const classes = [...token.matchAll(/\.([\w-]+)/g)].map((match) => match[1]!);
+    const ids = [...token.matchAll(/#([\w-]+)/g)].map((match) => match[1]!);
+    if (ids.length > 1) return undefined;
+    specificity += ids.length * 100 + classes.length * 10 + (tag ? 1 : 0);
+    parts.push({ classes, ...(ids[0] ? { id: ids[0] } : {}), ...(tag ? { tag } : {}) });
+  }
+  return parts.length > 0 ? { parts, specificity } : undefined;
+}
+
+function selectorMatches(element: Element, selector: CssSelector): boolean {
+  let current: Element | undefined = element;
+  for (let index = selector.parts.length - 1; index >= 0; index -= 1) {
+    const part = selector.parts[index]!;
+    if (index === selector.parts.length - 1) {
+      if (!compoundSelectorMatches(current!, part)) return false;
+      current = parentElement(current!);
+      continue;
+    }
+    while (current && !compoundSelectorMatches(current, part)) {
+      current = parentElement(current);
+    }
+    if (!current) return false;
+    current = parentElement(current);
+  }
+  return true;
+}
+
+function compoundSelectorMatches(element: Element, part: CssSelectorPart): boolean {
+  if (part.tag && element.tagName.toLowerCase() !== part.tag) return false;
+  if (part.id && element.getAttribute("id") !== part.id) return false;
+  return part.classes.every((token) => hasClass(element, token));
+}
+
+function parentElement(element: Element): Element | undefined {
+  return element.parentNode?.nodeType === 1 ? element.parentNode as Element : undefined;
+}
+
+function ownStyle(element: Element): Map<string, string> {
   const style = new Map<string, string>();
-  const names = [
-    "fill",
-    "stroke",
-    "stroke-width",
-    "stroke-dasharray",
-    "marker-start",
-    "marker-end",
-    "font-family",
-    "font-size",
-    "text-anchor",
-    "color",
-  ];
-  for (const name of names) {
+  for (const name of STYLE_NAMES) {
     const value = element.getAttribute(name);
     if (value) {
       style.set(name, stripCssPriority(value));
     }
   }
+  const context = element.ownerDocument ? CSS_CONTEXTS.get(element.ownerDocument) : undefined;
+  const matching = context?.rules
+    .filter(({ selector }) => selectorMatches(element, selector))
+    .sort((left, right) => left.selector.specificity - right.selector.specificity
+      || left.sourceOrder - right.sourceOrder) ?? [];
+  const inlineDeclarations: CssDeclaration[] = [];
   for (const declaration of (element.getAttribute("style") ?? "").split(";")) {
     const separator = declaration.indexOf(":");
     if (separator > 0) {
-      style.set(
-        declaration.slice(0, separator).trim().toLowerCase(),
-        stripCssPriority(declaration.slice(separator + 1).trim()),
-      );
+      const priority = cssPriority(declaration.slice(separator + 1).trim());
+      inlineDeclarations.push({
+        important: priority.important,
+        name: declaration.slice(0, separator).trim().toLowerCase(),
+        value: priority.value,
+      });
     }
   }
-  try {
-    const computed = element.ownerDocument?.defaultView?.getComputedStyle(element);
-    if (computed) {
-      for (const name of names) {
-        if (!style.has(name)) {
-          const value = computed.getPropertyValue(name);
-          if (value) {
-            style.set(name, stripCssPriority(value));
-          }
-        }
-      }
+  for (const rule of matching) {
+    for (const { important, name, value } of rule.declarations) {
+      if (!important) style.set(name, value);
     }
-  } catch {
-    // Attribute-only SVG parsing remains available in non-browser runtimes.
+  }
+  for (const { important, name, value } of inlineDeclarations) {
+    if (!important) style.set(name, value);
+  }
+  // Author !important declarations outrank all normal declarations. Inline
+  // important declarations retain the highest author-origin specificity.
+  for (const rule of matching) {
+    for (const { important, name, value } of rule.declarations) {
+      if (important) style.set(name, value);
+    }
+  }
+  for (const { important, name, value } of inlineDeclarations) {
+    if (important) style.set(name, value);
   }
   return style;
+}
+
+function readStyle(element: Element): Map<string, string> {
+  const style = ownStyle(element);
+  let ancestor = parentElement(element);
+  while (ancestor) {
+    const inherited = ownStyle(ancestor);
+    for (const name of INHERITED_STYLE_NAMES) {
+      if (!style.has(name) && inherited.has(name)) style.set(name, inherited.get(name)!);
+    }
+    ancestor = parentElement(ancestor);
+  }
+  return style;
+}
+
+function reportUnsupportedSvgFeatures(
+  root: SvgElementLike,
+  diagnostics: ConversionDiagnostic[],
+): void {
+  Array.from(root.getElementsByTagName("use")).forEach((element, index) => {
+    diagnostics.push({
+      code: "SVG_USE_UNSUPPORTED",
+      elementId: svgElementIdentity(element, "use", index),
+      message: "SVG <use> references are not expanded; this element was omitted from editable geometry.",
+      severity: "warning",
+    });
+  });
+  Array.from(root.getElementsByTagName("*"))
+    .filter((element) => /var\s*\(/i.test(element.getAttribute("style") ?? ""))
+    .forEach((element, index) => {
+      diagnostics.push({
+        code: "SVG_CSS_VARIABLE_UNSUPPORTED",
+        elementId: svgElementIdentity(element, element.tagName.toLowerCase(), index),
+        message: "An inline CSS variable could not be resolved deterministically and was ignored.",
+        severity: "warning",
+      });
+    });
+  Array.from(root.getElementsByTagName("*"))
+    .filter((element) => {
+      const filter = readStyle(element).get("filter");
+      return Boolean(filter && filter !== "none");
+    })
+    .forEach((element, index) => {
+      diagnostics.push({
+        code: "SVG_FILTER_UNSUPPORTED",
+        elementId: svgElementIdentity(element, element.tagName.toLowerCase(), index),
+        message: "SVG filter effects have no deterministic editable mapping and were omitted.",
+        severity: "warning",
+      });
+    });
+}
+
+function svgElementIdentity(element: Element, prefix: string, index: number): string {
+  let current: Element | undefined = element;
+  while (current) {
+    const identity = current.getAttribute("id") || current.getAttribute("data-id");
+    if (identity) return identity;
+    current = parentElement(current);
+  }
+  return `${prefix}-${index + 1}`;
 }
 
 function firstTextStyleTarget(element: Element): Element | undefined {
@@ -520,7 +1064,15 @@ function hasSelfOrAncestorClass(
 }
 
 function stripCssPriority(value: string): string {
-  return value.replace(/\s*!important\s*$/i, "").trim();
+  return cssPriority(value).value;
+}
+
+function cssPriority(value: string): { important: boolean; value: string } {
+  const important = /\s*!important\s*$/i.test(value);
+  return {
+    important,
+    value: value.replace(/\s*!important\s*$/i, "").trim(),
+  };
 }
 
 function readViewBox(root: Element): ViewBox | undefined {
@@ -734,22 +1286,130 @@ function dedupePoints(points: Point[]): Point[] {
 }
 
 function edgeDash(element: Element): DiagramLineDash {
-  if (hasClass(element, "edge-pattern-dotted")) {
-    return "dot";
-  }
-  if (hasClass(element, "edge-pattern-dashed")) {
-    return "dash";
-  }
   const dashArray = readStyle(element).get("stroke-dasharray");
-  if (!dashArray || dashArray === "none") {
-    return "solid";
+  if (dashArray) {
+    const values = normalizedDashArray(dashArray);
+    if (dashArray.trim().toLowerCase() === "none" || values.length === 0) return "solid";
+    const firstDash = values[0] ?? 3;
+    const strokeWidth = parseCssNumber(readStyle(element).get("stroke-width")) ?? 1;
+    return firstDash <= strokeWidth * 2 ? "dot" : "dash";
   }
-  const firstDash = numericValues(dashArray)[0] ?? 3;
-  const strokeWidth = parseCssNumber(readStyle(element).get("stroke-width")) ?? 1;
-  return firstDash <= strokeWidth * 2 ? "dot" : "dash";
+  // Classes are a renderer-compatible fallback only when no cascaded CSS
+  // value is available. The computed dash value remains authoritative.
+  if (hasClass(element, "edge-pattern-solid")) return "solid";
+  if (hasClass(element, "edge-pattern-dotted")) return "dot";
+  if (hasClass(element, "edge-pattern-dashed")) return "dash";
+  return "solid";
 }
 
-function markerArrow(element: Element, end: "start" | "end"): DiagramArrowKind {
+function edgeStrokeStyle(
+  element: Element,
+  shapeStyle: ReturnType<typeof readShapeStyle>,
+): DiagramStrokeStyle {
+  const style = readStyle(element);
+  const dashArray = normalizedDashArray(style.get("stroke-dasharray") ?? "");
+  const dashOffset = parseCssNumber(style.get("stroke-dashoffset"));
+  const lineCap = style.get("stroke-linecap");
+  const lineJoin = style.get("stroke-linejoin");
+  const opacity = parseCssNumber(style.get("stroke-opacity") ?? style.get("opacity"));
+  return {
+    ...(shapeStyle.stroke ? { color: shapeStyle.stroke } : {}),
+    ...(shapeStyle.strokeWidth !== undefined ? { width: shapeStyle.strokeWidth } : {}),
+    ...(dashArray.length > 0 ? { dashArray } : {}),
+    ...(dashOffset !== undefined ? { dashOffset } : {}),
+    ...(lineCap === "butt" || lineCap === "round" || lineCap === "square" ? { lineCap } : {}),
+    ...(lineJoin === "bevel" || lineJoin === "miter" || lineJoin === "round"
+      ? { lineJoin }
+      : {}),
+    ...(opacity !== undefined ? { opacity: Math.min(1, Math.max(0, opacity)) } : {}),
+  };
+}
+
+function normalizedDashArray(value: string): number[] {
+  const values = numericValues(value)
+    .filter((item) => Number.isFinite(item) && item >= 0);
+  return values.length > 0 && values.some((item) => item > 0) ? values : [];
+}
+
+function explicitSemanticEndpoint(element: Element, end: "source" | "target"): string | undefined {
+  const value = element.getAttribute(`data-${end}`)
+    || element.getAttribute(end === "source" ? "data-from" : "data-to");
+  return value?.trim() || undefined;
+}
+
+function semanticEndpoints(
+  element: Element,
+  nodes: readonly DiagramNode[],
+  start: Point,
+  end: Point,
+): { sourceId?: string; targetId?: string } {
+  const sourceId = explicitSemanticEndpoint(element, "source");
+  const targetId = explicitSemanticEndpoint(element, "target");
+  if (sourceId || targetId) {
+    const inferredSource = sourceId ?? nearestNodeKey(start, nodes);
+    const inferredTarget = targetId ?? nearestNodeKey(end, nodes);
+    return {
+      ...(inferredSource ? { sourceId: inferredSource } : {}),
+      ...(inferredTarget ? { targetId: inferredTarget } : {}),
+    };
+  }
+
+  // Mermaid 11 flowchart paths expose stable data-id values such as
+  // L_source_target_0, but commonly omit data-source/data-target attributes.
+  // Match the body against known semantic node IDs instead of splitting on
+  // underscores, which are valid inside Mermaid IDs.
+  const edgeId = element.getAttribute("data-id") ?? "";
+  const match = /^L_(.*)_\d+$/.exec(edgeId);
+  if (match?.[1]) {
+    const body = match[1];
+    const candidates = nodes.flatMap((source) => nodes.flatMap((target) => {
+      if (!source.semanticId || !target.semanticId
+        || `${source.semanticId}_${target.semanticId}` !== body) return [];
+      return [{
+        score: distanceToBounds(start, source.bounds) + distanceToBounds(end, target.bounds),
+        sourceId: source.semanticId,
+        targetId: target.semanticId,
+      }];
+    })).sort((left, right) => left.score - right.score);
+    const candidate = candidates[0];
+    if (candidate) return { sourceId: candidate.sourceId, targetId: candidate.targetId };
+  }
+
+  const inferredSource = nearestNodeKey(start, nodes);
+  const inferredTarget = nearestNodeKey(end, nodes);
+  return {
+    ...(inferredSource ? { sourceId: inferredSource } : {}),
+    ...(inferredTarget ? { targetId: inferredTarget } : {}),
+  };
+}
+
+function nearestNodeKey(point: Point, nodes: readonly DiagramNode[], tolerance = 8): string | undefined {
+  const nearest = nodes
+    .map((node) => ({
+      distance: distanceToBounds(point, node.bounds),
+      key: node.semanticId ?? node.sourceKey ?? node.id,
+    }))
+    .filter(({ distance }) => distance <= tolerance)
+    .sort((left, right) => left.distance - right.distance)[0];
+  return nearest?.key;
+}
+
+function distanceToBounds(point: Point, bounds: Bounds): number {
+  const dx = Math.max(bounds.x - point.x, 0, point.x - (bounds.x + bounds.width));
+  const dy = Math.max(bounds.y - point.y, 0, point.y - (bounds.y + bounds.height));
+  return Math.hypot(dx, dy);
+}
+
+function semanticNodeId(rendererId: string): string | undefined {
+  return /(?:^|.*-)flowchart-(.+)-\d+$/.exec(rendererId)?.[1];
+}
+
+function markerArrow(
+  element: Element,
+  end: "start" | "end",
+  edgeId: string,
+  diagnostics: ConversionDiagnostic[],
+): DiagramArrowKind {
   const marker = readStyle(element).get(`marker-${end}`)?.toLowerCase();
   if (!marker || marker === "none") {
     return "none";
@@ -763,10 +1423,16 @@ function markerArrow(element: Element, end: "start" | "end"): DiagramArrowKind {
   if (marker.includes("barb") || marker.includes("arrow")) {
     return "arrow";
   }
-  if (marker.includes("cross")) {
-    return "none";
+  if (marker.includes("point") || marker.includes("triangle")) {
+    return "triangle";
   }
-  return "triangle";
+  diagnostics.push({
+    code: "EDGE_MARKER_UNSUPPORTED",
+    elementId: edgeId,
+    message: `The ${end} marker '${marker}' has no safe editable mapping and was omitted.`,
+    severity: "warning",
+  });
+  return "none";
 }
 
 function semanticNodeKind(element: Element): DiagramNodeKind | undefined {
@@ -846,10 +1512,7 @@ function distanceToSegment(point: Point, start: Point, end: Point): number {
 }
 
 function editableObjectCount(nodes: DiagramNode[], edges: DiagramEdge[]): number {
-  return nodes.length + edges.reduce((count, edge) => {
-    const segments = Math.max(1, (edge.points?.length ?? 2) - 1);
-    return count + segments + (edge.label ? 1 : 0);
-  }, 0);
+  return nodes.length + edges.length + edges.filter(({ label }) => Boolean(label)).length;
 }
 
 function boundsForPoints(points: Point[]): Bounds | undefined {
@@ -912,6 +1575,18 @@ function normalizeColor(value: string | null | undefined): string | undefined {
       .toUpperCase();
   }
   return undefined;
+}
+
+function normalizeStyleColor(
+  value: string | null | undefined,
+  style: ReadonlyMap<string, string>,
+): string | undefined {
+  if (value?.trim().toLowerCase() === "currentcolor") {
+    const inheritedColor = style.get("color");
+    if (!inheritedColor || inheritedColor.trim().toLowerCase() === "currentcolor") return undefined;
+    return normalizeColor(inheritedColor);
+  }
+  return normalizeColor(value);
 }
 
 function normalizeText(value: string): string {

@@ -1,13 +1,23 @@
-import { readFile, writeFile } from "node:fs/promises";
-import { basename, dirname, extname, join } from "node:path";
+import { readFile, realpath, stat, writeFile } from "node:fs/promises";
+import { basename, dirname, extname, join, resolve } from "node:path";
 
-import { svgStringToPptxBuffer } from "@mmd2pptx/core";
+import {
+  drawioExporter,
+  jsonCanvasExporter,
+  parseMermaidSvg,
+  svgExporter,
+  svgStringToPptxBuffer,
+} from "@mmd2pptx/core";
 import type {
   ConversionOptions,
   ConversionResult,
 } from "@mmd2pptx/core";
 
-import { HELP_TEXT, parseCliArguments } from "./arguments.js";
+import {
+  HELP_TEXT,
+  parseCliArguments,
+  type CliOutputFormat,
+} from "./arguments.js";
 import { renderMermaidSourceToSvg } from "./render-mermaid.js";
 
 export interface CliIo {
@@ -16,6 +26,11 @@ export interface CliIo {
 }
 
 export interface CliDependencies {
+  convertForward?(
+    svg: string,
+    format: ForwardCliOutputFormat,
+    options?: ConversionOptions,
+  ): Promise<ConversionResult<string>>;
   convertSvg(
     svg: string,
     options?: ConversionOptions,
@@ -29,9 +44,12 @@ const defaultIo: CliIo = {
 };
 
 const defaultDependencies: CliDependencies = {
+  convertForward: convertForwardSvg,
   convertSvg: svgStringToPptxBuffer,
   renderMermaid: renderMermaidSourceToSvg,
 };
+
+type ForwardCliOutputFormat = Exclude<CliOutputFormat, "pptx">;
 
 export async function runCli(
   argv: string[],
@@ -66,9 +84,19 @@ export async function runCli(
     return 2;
   }
 
-  const outputPath = options.outputPath ?? defaultOutputPath(inputPath);
-  if (extname(outputPath).toLowerCase() !== ".pptx") {
-    io.error("mmd2pptx: The output path must end in .pptx.");
+  const outputPath = options.outputPath ?? defaultOutputPath(inputPath, options.format);
+  const expectedExtension = outputExtension(options.format);
+  if (extname(outputPath).toLowerCase() !== expectedExtension) {
+    io.error(`mmd2pptx: The ${options.format} output path must end in ${expectedExtension}.`);
+    return 2;
+  }
+  if (resolve(outputPath) === resolve(inputPath)
+    || await pathsReferToSameFile(inputPath, outputPath)) {
+    io.error("mmd2pptx: The output path must not overwrite the input file.");
+    return 2;
+  }
+  if (options.format !== "pptx" && options.mode !== undefined) {
+    io.error("mmd2pptx: --mode applies only to PPTX output.");
     return 2;
   }
 
@@ -77,12 +105,20 @@ export async function runCli(
     const svg = inputExtension === ".mmd"
       ? await dependencies.renderMermaid(source)
       : source;
-    const result = await dependencies.convertSvg(svg, {
+    const conversionOptions: ConversionOptions = {
       ...(options.backgroundColor === undefined
         ? {}
         : { backgroundColor: options.backgroundColor }),
       layout: options.layout,
-    });
+      ...(options.mode ? { mode: options.mode } : {}),
+    };
+    const result = options.format === "pptx"
+      ? await dependencies.convertSvg(svg, conversionOptions)
+      : await (dependencies.convertForward ?? convertForwardSvg)(
+        svg,
+        options.format,
+        conversionOptions,
+      );
 
     for (const diagnostic of result.diagnostics) {
       const location = diagnostic.elementId ? ` (${diagnostic.elementId})` : "";
@@ -110,12 +146,67 @@ export async function runCli(
   }
 }
 
-function defaultOutputPath(inputPath: string): string {
+async function pathsReferToSameFile(left: string, right: string): Promise<boolean> {
+  try {
+    const [realLeft, realRight, leftStat, rightStat] = await Promise.all([
+      realpath(left),
+      realpath(right),
+      stat(left),
+      stat(right),
+    ]);
+    return realLeft === realRight
+      || (leftStat.dev === rightStat.dev && leftStat.ino === rightStat.ino);
+  } catch {
+    // A new output path normally does not exist yet.
+    return false;
+  }
+}
+
+function defaultOutputPath(inputPath: string, format: CliOutputFormat): string {
   const inputExtension = extname(inputPath);
+  const extension = outputExtension(format);
+  const suffix = inputExtension.toLowerCase() === extension ? ".normalized" : "";
   return join(
     dirname(inputPath),
-    `${basename(inputPath, inputExtension)}.pptx`,
+    `${basename(inputPath, inputExtension)}${suffix}${extension}`,
   );
+}
+
+function outputExtension(format: CliOutputFormat): string {
+  switch (format) {
+    case "pptx": return ".pptx";
+    case "svg": return ".svg";
+    case "drawio": return ".drawio";
+    case "json-canvas": return ".canvas";
+  }
+}
+
+async function convertForwardSvg(
+  svg: string,
+  format: ForwardCliOutputFormat,
+  options: ConversionOptions = {},
+): Promise<ConversionResult<string>> {
+  const parsed = parseMermaidSvg(svg);
+  if (parsed.diagnostics.some(({ severity }) => severity === "error")) {
+    return { data: "", diagnostics: parsed.diagnostics, summary: parsed.summary };
+  }
+  const diagram = options.backgroundColor === undefined
+    ? parsed.data
+    : { ...parsed.data, backgroundColor: options.backgroundColor };
+  const exporter = format === "svg"
+    ? svgExporter
+    : format === "drawio"
+      ? drawioExporter
+      : jsonCanvasExporter;
+  const exported = await exporter.export(diagram, options);
+  return {
+    ...exported,
+    diagnostics: [...parsed.diagnostics, ...exported.diagnostics],
+    summary: {
+      ...exported.summary,
+      fallbackObjects: parsed.summary.fallbackObjects + exported.summary.fallbackObjects,
+    },
+  };
 }
 
 function errorMessage(error: unknown): string {

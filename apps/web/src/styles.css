@@ -98,10 +98,11 @@ h1 em { color: var(--accent); font-family: "Newsreader", Georgia, serif; font-we
   border: 1px solid var(--line);
   border-radius: 12px;
   display: grid;
-  grid-template-columns: 1.2fr repeat(3, minmax(160px, .55fr));
+  grid-template-columns: 1.2fr repeat(5, minmax(145px, .55fr));
   gap: 16px;
   background: rgba(255,255,255,.6);
 }
+.field.is-disabled { opacity: .48; }
 .field { display: grid; gap: 7px; color: var(--muted); font-size: 10px; font-weight: 700; letter-spacing: .07em; text-transform: uppercase; }
 .field input:not([type="color"]), .field select, .color-control {
   width: 100%; height: 38px; border: 1px solid var(--line); border-radius: 7px; background: var(--paper); color: var(--ink); font-size: 12px; letter-spacing: 0; text-transform: none;
@@ -156,8 +157,6 @@ textarea { width: 100%; height: 100%; padding: 20px; resize: none; border: 0; ou
   position: absolute;
   top: 0;
   left: 0;
-  transform-origin: 0 0;
-  will-change: transform;
 }
 .preview { width: 100%; height: 100%; display: grid; place-items: center; }
 .preview svg { display: block; width: 100%; height: 100%; max-width: none !important; max-height: none !important; }
@@ -277,7 +276,7 @@ body.preview-expanded { overflow: hidden; }
 .site-footer strong { color: var(--ink); }
 
 @media (max-width: 1000px) {
-  .controls-card { grid-template-columns: repeat(2, 1fr); }
+  .controls-card { grid-template-columns: repeat(3, 1fr); }
   .workspace { grid-template-columns: 1fr; }
   .panel { height: 560px; }
   .export-row { grid-template-columns: 1fr; }

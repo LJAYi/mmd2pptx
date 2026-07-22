@@ -1,0 +1,25 @@
+<!-- mmd2pptx synthetic fixture: Mermaid 11.16 renderer-prefix compatibility -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 360 140">
+  <g class="nodes">
+    <g class="node default" id="my-svg-flowchart-start_node-0" transform="translate(70,70)">
+      <rect x="-50" y="-25" width="100" height="50" rx="5"
+        fill="#eef4f7" stroke="#24323d" />
+      <foreignObject x="-40" y="-16" width="80" height="32">
+        <div xmlns="http://www.w3.org/1999/xhtml">Start</div>
+      </foreignObject>
+    </g>
+    <g class="node default" id="my-svg-flowchart-finish-1" transform="translate(290,70)">
+      <rect x="-50" y="-25" width="100" height="50"
+        fill="#faf0e6" stroke="#24323d" />
+      <foreignObject x="-40" y="-16" width="80" height="32">
+        <div xmlns="http://www.w3.org/1999/xhtml">Finish</div>
+      </foreignObject>
+    </g>
+  </g>
+  <g class="edgePaths">
+    <path id="my-svg-L-start_node-finish-0" data-id="L_start_node_finish_0"
+      class="flowchart-link edge-pattern-dashed"
+      d="M120,70 L240,70" fill="none" stroke="#24323d"
+      stroke-width="2" stroke-dasharray="6 3" />
+  </g>
+</svg>

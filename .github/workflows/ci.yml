@@ -41,6 +41,9 @@ jobs:
       - name: Type-check
         run: pnpm check
 
+      - name: Check generated compatibility matrix
+        run: pnpm compatibility:check
+
       - name: Test
         run: pnpm test
 

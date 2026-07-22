@@ -1,7 +1,9 @@
 import {
+  extractMermaidFlowchartSemantics,
   parseMermaidSvgElement,
   type ConversionDiagnostic,
   type ConversionSummary,
+  type MermaidSemanticGraph,
 } from "@mmd2pptx/core";
 import mermaid from "mermaid";
 
@@ -10,6 +12,37 @@ import { SvgPanZoomViewer } from "./svg-viewer.js";
 import "./styles.css";
 
 type MermaidTheme = "base" | "default" | "forest" | "dark" | "neutral";
+type ExportFormat = "drawio" | "json-canvas" | "pptx" | "svg";
+type PptxMode = "exact" | "faithful" | "smart";
+
+const MAX_MERMAID_FILE_BYTES = 1024 * 1024;
+
+const EXPORT_FORMATS = {
+  drawio: {
+    button: "Export draw.io",
+    extension: ".drawio",
+    mime: "application/xml",
+    title: "Export an editable draw.io diagram.",
+  },
+  "json-canvas": {
+    button: "Export JSON Canvas",
+    extension: ".canvas",
+    mime: "application/json",
+    title: "Export an open JSON Canvas document.",
+  },
+  pptx: {
+    button: "Export PowerPoint",
+    extension: ".pptx",
+    mime: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    title: "Export one clean, editable slide.",
+  },
+  svg: {
+    button: "Export SVG",
+    extension: ".svg",
+    mime: "image/svg+xml",
+    title: "Export a normalized standalone SVG.",
+  },
+} as const;
 
 interface RenderState {
   diagnostics: ConversionDiagnostic[];
@@ -57,10 +90,27 @@ app.innerHTML = `
           <span>File name</span>
           <span class="input-suffix-wrap">
             <input id="file-name" value="mmd2pptx-diagram" autocomplete="off" spellcheck="false" />
-            <small>.pptx</small>
+            <small id="file-suffix">.pptx</small>
           </span>
         </label>
         <label class="field">
+          <span>Export format</span>
+          <select id="export-format">
+            <option value="pptx">PowerPoint (.pptx)</option>
+            <option value="svg">SVG (.svg)</option>
+            <option value="drawio">draw.io (.drawio)</option>
+            <option value="json-canvas">JSON Canvas (.canvas)</option>
+          </select>
+        </label>
+        <label class="field" id="pptx-mode-field">
+          <span>PPTX mode</span>
+          <select id="pptx-mode">
+            <option value="smart">Smart — editable connectors</option>
+            <option value="faithful">Faithful — visual geometry</option>
+            <option value="exact">Exact — one SVG object</option>
+          </select>
+        </label>
+        <label class="field" id="pptx-layout-field">
           <span>Mermaid theme</span>
           <select id="theme">
             <option value="base">Base</option>
@@ -94,6 +144,8 @@ app.innerHTML = `
               <h2>Mermaid source</h2>
             </div>
             <div class="examples">
+              <button class="text-button" id="source-file-open" type="button">Open .mmd</button>
+              <input id="source-file" type="file" accept=".mmd,.mermaid,text/plain" hidden />
               <button class="text-button" id="mini-example" type="button">Simple example</button>
               <button class="text-button" id="full-example" type="button">Detailed example</button>
             </div>
@@ -166,7 +218,7 @@ app.innerHTML = `
             </div>
           </div>
           <footer class="panel-footer preview-footer">
-            <span>Preview reflects the selected theme</span>
+            <span>Vector preview · local conversion</span>
             <button id="fit-preview" class="text-button" type="button">Fit to view</button>
           </footer>
         </article>
@@ -191,8 +243,8 @@ app.innerHTML = `
         </div>
 
         <div class="download-card">
-          <p>Ready for your deck?</p>
-          <h2>Export one clean, editable slide.</h2>
+          <p id="export-lead">Ready for your deck?</p>
+          <h2 id="export-title">Export one clean, editable slide.</h2>
           <button id="export" class="export-button" type="button" disabled>
             <span>Export PowerPoint</span>
             <i aria-hidden="true">↓</i>
@@ -216,10 +268,15 @@ const elements = {
   diagnosticTitle: required<HTMLHeadingElement>("#diagnostic-title"),
   emptyState: required<HTMLDivElement>("#empty-state"),
   exportButton: required<HTMLButtonElement>("#export"),
+  exportFormat: required<HTMLSelectElement>("#export-format"),
+  exportLead: required<HTMLParagraphElement>("#export-lead"),
+  exportTitle: required<HTMLHeadingElement>("#export-title"),
   fileName: required<HTMLInputElement>("#file-name"),
+  fileSuffix: required<HTMLElement>("#file-suffix"),
   fitPreview: required<HTMLButtonElement>("#fit-preview"),
   fullExample: required<HTMLButtonElement>("#full-example"),
   layout: required<HTMLSelectElement>("#layout"),
+  layoutField: required<HTMLElement>("#pptx-layout-field"),
   metrics: {
     editable: required<HTMLElement>("#metric-editable"),
     edges: required<HTMLElement>("#metric-edges"),
@@ -229,8 +286,12 @@ const elements = {
   miniExample: required<HTMLButtonElement>("#mini-example"),
   preview: required<HTMLDivElement>("#preview"),
   previewStage: required<HTMLDivElement>("#preview-stage"),
+  pptxMode: required<HTMLSelectElement>("#pptx-mode"),
+  pptxModeField: required<HTMLElement>("#pptx-mode-field"),
   renderState: required<HTMLDivElement>("#render-state"),
   source: required<HTMLTextAreaElement>("#source"),
+  sourceFile: required<HTMLInputElement>("#source-file"),
+  sourceFileOpen: required<HTMLButtonElement>("#source-file-open"),
   sourceLink: required<HTMLAnchorElement>("#source-link"),
   sourceCount: required<HTMLSpanElement>("#source-count"),
   theme: required<HTMLSelectElement>("#theme"),
@@ -251,9 +312,13 @@ if (repositoryUrl) {
 }
 
 let debounceTimer = 0;
+let inspectionSequence = 0;
 let renderSequence = 0;
 let lastState: RenderState = { diagnostics: [] };
+let semanticDiagnostics: ConversionDiagnostic[] = [];
+let semantics: MermaidSemanticGraph | undefined;
 
+updateExportControls();
 elements.source.value = EXAMPLE_DIAGRAM;
 updateSourceCount();
 scheduleRender(0);
@@ -262,6 +327,8 @@ elements.source.addEventListener("input", () => {
   updateSourceCount();
   scheduleRender();
 });
+elements.sourceFileOpen.addEventListener("click", () => elements.sourceFile.click());
+elements.sourceFile.addEventListener("change", () => void importMermaidFile());
 elements.theme.addEventListener("change", () => scheduleRender(0));
 elements.background.addEventListener("input", () => {
   elements.backgroundValue.value = elements.background.value.toUpperCase();
@@ -269,14 +336,19 @@ elements.background.addEventListener("input", () => {
   scheduleReadinessCheck();
 });
 elements.layout.addEventListener("change", scheduleReadinessCheck);
+elements.exportFormat.addEventListener("change", () => {
+  updateExportControls();
+  scheduleReadinessCheck();
+});
+elements.pptxMode.addEventListener("change", scheduleReadinessCheck);
 elements.fullExample.addEventListener("click", () => loadExample(EXAMPLE_DIAGRAM));
 elements.miniExample.addEventListener("click", () => loadExample(MINI_EXAMPLE));
 elements.fitPreview.addEventListener("click", () => svgViewer.fit());
-elements.exportButton.addEventListener("click", () => void exportPowerPoint());
+elements.exportButton.addEventListener("click", () => void exportCurrentFormat());
 window.addEventListener("keydown", (event) => {
   if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
     event.preventDefault();
-    if (!elements.exportButton.disabled) void exportPowerPoint();
+    if (!elements.exportButton.disabled) void exportCurrentFormat();
   }
 });
 
@@ -301,12 +373,18 @@ function updateSourceCount(): void {
 
 function scheduleRender(delay = 320): void {
   window.clearTimeout(debounceTimer);
+  inspectionSequence += 1;
+  elements.exportButton.disabled = true;
   setRenderState("rendering", "Rendering");
   debounceTimer = window.setTimeout(() => void renderDiagram(), delay);
 }
 
 function scheduleReadinessCheck(): void {
-  if (elements.preview.querySelector("svg")) void inspectConversion();
+  if (elements.preview.querySelector("svg")) {
+    elements.exportButton.disabled = true;
+    setDiagnosticStatus("checking", "Checking export readiness…", "Checking");
+    void inspectConversion();
+  }
 }
 
 async function renderDiagram(): Promise<void> {
@@ -328,7 +406,7 @@ async function renderDiagram(): Promise<void> {
       startOnLoad: false,
       securityLevel: "strict",
       theme: elements.theme.value as MermaidTheme,
-      flowchart: { curve: "linear", nodeSpacing: 30, rankSpacing: 42 },
+      flowchart: { nodeSpacing: 30, rankSpacing: 42 },
       themeVariables: {
         fontFamily: "Arial, sans-serif",
         lineColor: "#24323d",
@@ -341,6 +419,27 @@ async function renderDiagram(): Promise<void> {
     const rendered = await mermaid.render(`mmd2pptx-preview-${sequence}`, source);
     if (sequence !== renderSequence) return;
 
+    let nextSemantics: MermaidSemanticGraph | undefined;
+    let nextSemanticDiagnostics: ConversionDiagnostic[] = [];
+    try {
+      const diagram = await mermaid.mermaidAPI.getDiagramFromText(source);
+      if (sequence !== renderSequence) return;
+      const extracted = extractMermaidFlowchartSemantics(diagram);
+      nextSemantics = extracted.graph ?? undefined;
+      nextSemanticDiagnostics = extracted.diagnostics.map((diagnostic) =>
+        !extracted.graph && diagnostic.severity === "error"
+          ? { ...diagnostic, severity: "warning" as const }
+          : diagnostic);
+    } catch (error) {
+      nextSemanticDiagnostics = [{
+        code: "MERMAID_FLOWDB_READ_FAILED",
+        message: `Mermaid source semantics were unavailable; SVG fallback remains active: ${readableError(error)}`,
+        severity: "warning",
+      }];
+    }
+    if (sequence !== renderSequence) return;
+    semantics = nextSemantics;
+    semanticDiagnostics = nextSemanticDiagnostics;
     elements.preview.innerHTML = rendered.svg;
     elements.previewStage.style.backgroundColor = elements.background.value;
     elements.emptyState.hidden = true;
@@ -357,6 +456,8 @@ async function renderDiagram(): Promise<void> {
     const message = readableError(error);
     elements.preview.replaceChildren();
     svgViewer.clear();
+    semantics = undefined;
+    semanticDiagnostics = [];
     elements.emptyState.hidden = false;
     lastState = { diagnostics: [], syntaxError: message };
     setRenderState("error", "Syntax error");
@@ -367,15 +468,55 @@ async function renderDiagram(): Promise<void> {
 async function inspectConversion(): Promise<void> {
   const svg = elements.preview.querySelector<SVGSVGElement>("svg");
   if (!svg) return;
+  const sequence = ++inspectionSequence;
+  const selectedFormat = selectedExportFormat();
+  const selectedMode = elements.pptxMode.value as PptxMode;
 
   try {
-    const parsed = parseMermaidSvgElement(svg);
+    const parsed = parseMermaidSvgElement(svg, semantics ? { semantics } : {});
+    const core = await import("@mmd2pptx/core");
+    const diagram = parsed.data;
+    const format = selectedFormat;
+    const commonOptions = { backgroundColor: elements.background.value };
+    let preflight;
+    if (format === "pptx") {
+      preflight = core.preflightDiagramToPptx(diagram, {
+        ...commonOptions,
+        layout: elements.layout.value as "wide" | "standard",
+        mode: selectedMode,
+      });
+    } else if (!isSupportedForwardDiagram(diagram.source?.diagramType)) {
+      const diagramType = diagram.source?.diagramType ?? "this diagram type";
+      preflight = {
+        diagnostics: [{
+          code: `${format.toUpperCase().replaceAll("-", "_")}_DIAGRAM_TYPE_UNSUPPORTED`,
+          message: `${formatLabel(format)} export does not yet support ${diagramType}; use PowerPoint exact mode to preserve the live SVG.`,
+          severity: "error" as const,
+        }],
+        summary: parsed.summary,
+      };
+    } else {
+      preflight = await (format === "svg"
+        ? core.svgExporter.export(diagram, commonOptions)
+        : format === "drawio"
+          ? core.drawioExporter.export(diagram, commonOptions)
+          : core.jsonCanvasExporter.export(diagram, commonOptions));
+    }
+    if (sequence !== inspectionSequence
+      || selectedFormat !== selectedExportFormat()
+      || selectedMode !== elements.pptxMode.value
+      || svg !== elements.preview.querySelector("svg")) return;
     lastState = {
-      diagnostics: parsed.diagnostics,
-      summary: parsed.summary,
+      diagnostics: [
+        ...semanticDiagnostics,
+        ...parsed.diagnostics,
+        ...preflight.diagnostics,
+      ],
+      summary: preflight.summary,
     };
     updateDiagnostics(lastState);
   } catch (error) {
+    if (sequence !== inspectionSequence) return;
     lastState = {
       diagnostics: [{ code: "SVG_PARSE_FAILED", message: readableError(error), severity: "error" }],
     };
@@ -396,8 +537,11 @@ function updateDiagnostics(state: RenderState): void {
   elements.metrics.edges.textContent = hasSummary ? String(summary.edges) : "—";
   elements.metrics.editable.textContent = hasSummary ? String(summary.editableObjects) : "—";
   elements.metrics.fallback.textContent = hasSummary ? String(summary.fallbackObjects) : "—";
+  const displayedItems = items.filter((diagnostic, index, all) =>
+    all.findIndex((candidate) => candidate.code === diagnostic.code) === index,
+  );
   elements.diagnosticList.replaceChildren(
-    ...items.slice(0, 8).map((diagnostic) => {
+    ...displayedItems.slice(0, 8).map((diagnostic) => {
       const item = document.createElement("li");
       item.className = `diagnostic-${diagnostic.severity}`;
       const code = document.createElement("code");
@@ -415,6 +559,9 @@ function updateDiagnostics(state: RenderState): void {
   } else if (!hasSummary) {
     setDiagnosticStatus("checking", "Checking diagram…", "Checking");
     elements.exportButton.disabled = true;
+  } else if (selectedExportFormat() === "pptx" && elements.pptxMode.value === "exact") {
+    setDiagnosticStatus("ready", "Appearance preserved as one SVG", "Ready");
+    elements.exportButton.disabled = false;
   } else if (warnings.length > 0 || summary.fallbackObjects > 0) {
     setDiagnosticStatus("warning", "Exportable with notes", `${warnings.length || summary.fallbackObjects} notes`);
     elements.exportButton.disabled = false;
@@ -436,65 +583,185 @@ function setRenderState(kind: string, label: string): void {
   if (text) text.textContent = label;
 }
 
-async function exportPowerPoint(): Promise<void> {
+async function exportCurrentFormat(): Promise<void> {
   const svg = elements.preview.querySelector<SVGSVGElement>("svg");
   if (!svg) return;
 
+  const format = selectedExportFormat();
+  const pptxMode = elements.pptxMode.value as PptxMode;
+  const slideLayout = elements.layout.value as "wide" | "standard";
+  const sourceAtStart = elements.source.value;
+  const spec = EXPORT_FORMATS[format];
+
   elements.exportButton.disabled = true;
+  elements.exportFormat.disabled = true;
+  elements.pptxMode.disabled = true;
+  elements.layout.disabled = true;
   elements.exportButton.classList.add("busy");
-  elements.exportButton.querySelector("span")!.textContent = "Building slide…";
+  elements.exportButton.querySelector("span")!.textContent = `Building ${formatLabel(format)}…`;
 
   try {
-    const parsed = parseMermaidSvgElement(svg);
+    const parsed = parseMermaidSvgElement(svg, semantics ? { semantics } : {});
     if (parsed.diagnostics.some((item) => item.severity === "error")) {
       throw new Error("The diagram contains conversion errors. Review diagnostics before exporting.");
     }
 
-    // PowerPoint generation is the heaviest dependency; load it only when requested.
-    const { diagramToPptxBlob } = await import("@mmd2pptx/core");
-    const result = await diagramToPptxBlob(parsed.data, {
-      backgroundColor: elements.background.value,
-      fileName: normalizedFileName(),
-      layout: elements.layout.value as "wide" | "standard",
-    });
-    const outputDiagnostics = [...parsed.diagnostics, ...result.diagnostics];
-    lastState = { diagnostics: outputDiagnostics, summary: result.summary };
-    updateDiagnostics(lastState);
-
-    if (outputDiagnostics.some((item) => item.severity === "error")) {
-      throw new Error("PowerPoint validation failed. No file was downloaded.");
+    // Exporters are loaded only when requested; PowerPoint remains the heaviest path.
+    const core = await import("@mmd2pptx/core");
+    const diagram = parsed.data;
+    const commonOptions = { backgroundColor: elements.background.value };
+    const result = format === "pptx"
+      ? pptxMode === "exact"
+        ? await core.svgStringToPptxBlob(serializeLiveSvgForExport(svg), {
+            ...commonOptions,
+            fileName: normalizedFileName(format),
+            layout: slideLayout,
+            mode: "exact",
+          })
+        : await core.diagramToPptxBlob(diagram, {
+          ...commonOptions,
+          fileName: normalizedFileName(format),
+          layout: slideLayout,
+          mode: pptxMode,
+        })
+      : format === "svg"
+        ? await core.svgExporter.export(diagram, {
+            ...commonOptions,
+            title: normalizedBaseName(),
+          })
+        : format === "drawio"
+          ? await core.drawioExporter.export(diagram, {
+              ...commonOptions,
+              pageName: normalizedBaseName(),
+            })
+          : await core.jsonCanvasExporter.export(diagram, commonOptions);
+    const outputDiagnostics = [
+      ...semanticDiagnostics,
+      ...parsed.diagnostics,
+      ...result.diagnostics,
+    ];
+    const requestIsCurrent = sourceAtStart === elements.source.value
+      && svg === elements.preview.querySelector("svg")
+      && format === selectedExportFormat()
+      && pptxMode === elements.pptxMode.value;
+    if (requestIsCurrent) {
+      lastState = { diagnostics: outputDiagnostics, summary: result.summary };
+      updateDiagnostics(lastState);
     }
 
-    downloadBlob(result.data, normalizedFileName());
+    if (outputDiagnostics.some((item) => item.severity === "error")) {
+      throw new Error(`${formatLabel(format)} validation failed. No file was downloaded.`);
+    }
+
+    const blob = result.data instanceof Blob
+      ? result.data
+      : new Blob([result.data], { type: spec.mime });
+    downloadBlob(blob, normalizedFileName(format));
     elements.exportButton.querySelector("span")!.textContent = "Downloaded";
     window.setTimeout(() => resetExportButton(), 1600);
+    restoreExportSelectors();
   } catch (error) {
     const diagnostic: ConversionDiagnostic = {
       code: "EXPORT_FAILED",
       message: readableError(error),
       severity: "error",
     };
-    lastState = lastState.summary
-      ? { diagnostics: [...lastState.diagnostics, diagnostic], summary: lastState.summary }
-      : { diagnostics: [...lastState.diagnostics, diagnostic] };
-    updateDiagnostics(lastState);
+    if (sourceAtStart === elements.source.value && svg === elements.preview.querySelector("svg")) {
+      lastState = lastState.summary
+        ? { diagnostics: [...lastState.diagnostics, diagnostic], summary: lastState.summary }
+        : { diagnostics: [...lastState.diagnostics, diagnostic] };
+      updateDiagnostics(lastState);
+    }
     resetExportButton();
+    restoreExportSelectors();
   }
+}
+
+function restoreExportSelectors(): void {
+  elements.exportFormat.disabled = false;
+  const isPptx = selectedExportFormat() === "pptx";
+  elements.pptxMode.disabled = !isPptx;
+  elements.layout.disabled = !isPptx;
 }
 
 function resetExportButton(): void {
   elements.exportButton.classList.remove("busy");
-  elements.exportButton.querySelector("span")!.textContent = "Export PowerPoint";
+  elements.exportButton.querySelector("span")!.textContent =
+    EXPORT_FORMATS[selectedExportFormat()].button;
   const hasErrors = lastState.diagnostics.some((item) => item.severity === "error");
   elements.exportButton.disabled = hasErrors || Boolean(lastState.syntaxError) || !lastState.summary;
 }
 
-function normalizedFileName(): string {
-  const base = elements.fileName.value
+function normalizedBaseName(): string {
+  return elements.fileName.value
     .trim()
-    .replace(/\.pptx$/i, "")
+    .replace(/\.(?:pptx|svg|drawio|canvas|layout\.json)$/i, "")
     .replace(/[\\/:*?"<>|]/g, "-") || "mmd2pptx-diagram";
-  return `${base}.pptx`;
+}
+
+function normalizedFileName(format: ExportFormat = selectedExportFormat()): string {
+  return `${normalizedBaseName()}${EXPORT_FORMATS[format].extension}`;
+}
+
+async function importMermaidFile(): Promise<void> {
+  const file = elements.sourceFile.files?.[0];
+  elements.sourceFile.value = "";
+  if (!file) return;
+  if (file.size > MAX_MERMAID_FILE_BYTES) {
+    lastState = {
+      diagnostics: [{
+        code: "MERMAID_FILE_TOO_LARGE",
+        message: "Mermaid files must be 1 MiB or smaller.",
+        severity: "error",
+      }],
+    };
+    setRenderState("error", "File too large");
+    updateDiagnostics(lastState);
+    return;
+  }
+  elements.source.value = await file.text();
+  const baseName = file.name.replace(/\.(?:mmd|mermaid)$/i, "").trim();
+  if (baseName) elements.fileName.value = baseName;
+  updateSourceCount();
+  scheduleRender(0);
+  elements.source.focus();
+}
+
+function selectedExportFormat(): ExportFormat {
+  return elements.exportFormat.value as ExportFormat;
+}
+
+function updateExportControls(): void {
+  const format = selectedExportFormat();
+  const spec = EXPORT_FORMATS[format];
+  const isPptx = format === "pptx";
+  elements.fileSuffix.textContent = spec.extension;
+  elements.pptxMode.disabled = !isPptx;
+  elements.layout.disabled = !isPptx;
+  elements.pptxModeField.classList.toggle("is-disabled", !isPptx);
+  elements.layoutField.classList.toggle("is-disabled", !isPptx);
+  elements.exportLead.textContent = isPptx ? "Ready for your deck?" : "Ready for another canvas?";
+  elements.exportTitle.textContent = spec.title;
+  resetExportButton();
+}
+
+function formatLabel(format: ExportFormat): string {
+  switch (format) {
+    case "drawio": return "draw.io";
+    case "json-canvas": return "JSON Canvas";
+    case "svg": return "SVG";
+    default: return "PowerPoint";
+  }
+}
+
+function isSupportedForwardDiagram(diagramType: string | undefined): boolean {
+  return diagramType === undefined || diagramType === "flowchart" || diagramType === "flowchart-v2";
+}
+
+function serializeLiveSvgForExport(svg: SVGSVGElement): string {
+  const clone = svg.cloneNode(true) as SVGSVGElement;
+  clone.setAttribute("xmlns", "http://www.w3.org/2000/svg");
+  return new XMLSerializer().serializeToString(clone);
 }
 
 function downloadBlob(blob: Blob, fileName: string): void {

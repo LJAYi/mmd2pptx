@@ -1,0 +1,12 @@
+<!-- mmd2pptx synthetic fixture -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 160">
+  <defs>
+    <marker id="cap-arrow"><path d="M0,0 L10,5 L0,10 Z" /></marker>
+  </defs>
+  <g class="edgePaths">
+    <path id="edge-complete-path" class="flowchart-link edge-pattern-dashed"
+      d="M20,80 L70,80 C90,20 130,140 150,80 Q180,20 210,80 A30,20 0 0 1 270,80"
+      stroke="#345678" stroke-width="2" fill="none"
+      marker-end="url(#cap-arrow)" />
+  </g>
+</svg>
