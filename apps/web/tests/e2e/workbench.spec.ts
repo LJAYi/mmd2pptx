@@ -178,8 +178,9 @@ test("supports pan, zoom, fit, expand, and copy without mutating the export SVG"
     transform: (element as HTMLElement).style.transform,
     width: Number.parseFloat((element as HTMLElement).style.width),
   }));
-  expect(canvasAt120.width).toBeCloseTo(canvasAt100.width * 1.2, 5);
-  expect(canvasAt120.height).toBeCloseTo(canvasAt100.height * 1.2, 5);
+  // Browsers serialize CSS pixel lengths to a finite decimal precision.
+  expect(Math.abs(canvasAt120.width - canvasAt100.width * 1.2)).toBeLessThan(0.02);
+  expect(Math.abs(canvasAt120.height - canvasAt100.height * 1.2)).toBeLessThan(0.02);
   expect(canvasAt120.transform).not.toContain("scale");
 
   await viewport.dispatchEvent("wheel", { clientX: 100, clientY: 100, deltaY: -100 });
