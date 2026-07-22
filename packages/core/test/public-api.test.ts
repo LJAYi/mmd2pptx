@@ -9,15 +9,8 @@ import {
   exportDiagramToSvg,
   exporterCapabilities,
   jsonCanvasExporter,
-  applyLayoutSidecar,
-  parseLayoutSidecar,
   preflightDiagramToPptx,
-  reconcileLayout,
-  removeLayoutGroup,
   routeOrthogonal,
-  serializeLayoutSidecar,
-  setManualGroupLayout,
-  setNodeZIndex,
   svgExporter,
 } from "../src/index.js";
 import type {
@@ -46,14 +39,7 @@ describe("forward exporter public API", () => {
     expect(drawioExporter.format).toBe("drawio");
     expect(jsonCanvasExporter.format).toBe("json-canvas");
     expect(exporterCapabilities()).toBe(EXPORTER_CAPABILITIES);
-    expect(applyLayoutSidecar).toBeTypeOf("function");
-    expect(parseLayoutSidecar).toBeTypeOf("function");
-    expect(reconcileLayout).toBeTypeOf("function");
-    expect(removeLayoutGroup).toBeTypeOf("function");
-    expect(serializeLayoutSidecar).toBeTypeOf("function");
     expect(routeOrthogonal).toBeTypeOf("function");
-    expect(setNodeZIndex).toBeTypeOf("function");
-    expect(setManualGroupLayout).toBeTypeOf("function");
     expect(preflightDiagramToPptx).toBeTypeOf("function");
     expect(analyzeDiagramCollisions).toBeTypeOf("function");
   });

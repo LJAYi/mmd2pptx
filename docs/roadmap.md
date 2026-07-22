@@ -1,14 +1,13 @@
 # Forward conversion roadmap
 
-The current roadmap is exclusively forward: Mermaid source plus optional layout
-overrides are exported to other formats. Reverse importers are deferred.
+The current roadmap is exclusively forward: Mermaid source is exported to other
+formats. Reverse importers are deferred.
 
 ## Shared foundation
 
 - Unified Diagram IR v1 with stable semantic/source keys
 - optional Mermaid FlowDB semantic graph merged with authoritative SVG geometry
 - canonical path geometry and computed stroke metadata
-- versioned layout sidecar
 - exporter contract and capability diagnostics
 - synthetic fixtures and generated compatibility documentation
 
@@ -35,21 +34,11 @@ cross-platform verification.
 
 No draw.io, SVG, or JSON Canvas importer is included in this stage.
 
-## Stage 3: visual adjustment workspace
-
-- Mermaid remains the semantic source
-- a versioned sidecar stores positions, sizes, ports, full curve paths, labels,
-  groups, and layers
-- source reconciliation retains overrides for stable nodes and removes stale data
-- the workspace exports through the same PPTX, SVG, draw.io, and JSON Canvas
-  implementations as the SDK and CLI
-
 ## Parallel delivery lanes
 
 1. IR, source mapping, capability contracts, and integration
 2. PowerPoint edge primitives and conversion modes
 3. SVG, draw.io, and JSON Canvas exporters
-4. layout sidecar and visual editor interactions
 
 Each lane ships independently testable slices, but output integration waits for
 the shared IR and stable-ID contracts rather than inventing format-specific
