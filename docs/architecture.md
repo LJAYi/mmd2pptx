@@ -12,9 +12,10 @@ projects with similar functionality.
 2. For Flowcharts, the web app structurally adapts Mermaid FlowDB semantics;
    core merges those identities with renderer SVG geometry into a target-neutral
    `DiagramIR`.
-3. Forward exporters map the same IR to PPTX, normalized SVG, draw.io, or JSON
+3. Optional layout overrides preserve visual edits without rewriting Mermaid.
+4. Forward exporters map the same IR to PPTX, normalized SVG, draw.io, or JSON
    Canvas.
-4. Output-specific validators inspect the generated artifact and report explicit
+5. Output-specific validators inspect the generated artifact and report explicit
    capability fallbacks.
 
 The browser application runs this pipeline locally. Diagram source does not

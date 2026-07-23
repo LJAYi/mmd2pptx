@@ -1,16 +1,12 @@
 import type { DiagramEdge, DiagramLineDash } from "./types.js";
 
-/** Normalize public-IR dash arrays for SVG/draw.io importers.
- * SVG repeats odd-length patterns, but several desktop importers do not, so
- * make that repetition explicit (for example `[2]` becomes `[2, 2]`).
- */
+/** Normalize public-IR dash arrays; SVG all-zero patterns mean a solid stroke. */
 export function nonZeroDashArray(
   values: readonly number[] | undefined,
 ): readonly number[] | undefined {
   if (!values || values.length === 0) return undefined;
   if (values.some((value) => !Number.isFinite(value) || value < 0)) return undefined;
-  if (!values.some((value) => value > 0)) return undefined;
-  return values.length % 2 === 0 ? values : [...values, ...values];
+  return values.some((value) => value > 0) ? values : undefined;
 }
 
 /** Resolve conflicting legacy `dash` and structured stroke metadata consistently. */

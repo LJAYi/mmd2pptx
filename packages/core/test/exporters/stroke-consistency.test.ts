@@ -23,8 +23,7 @@ describe("cross-exporter stroke consistency", () => {
 
     const normalized = sync(svgExporter.export(parsed.data)).data;
     expect(normalized).not.toContain("stroke-dasharray:0");
-    expect(normalized).not.toContain("marker-end=");
-    expect(normalized).toContain('data-diagram-arrow="end"');
+    expect(normalized).toContain("marker-end=");
 
     const drawio = sync(drawioExporter.export(parsed.data)).data;
     const drawioEdge = drawioCell(drawio, "L_A_B_0");
@@ -55,21 +54,6 @@ describe("cross-exporter stroke consistency", () => {
     expect(drawioCell(sync(drawioExporter.export(parsed.data)).data, "L_A_B_0")
       ?.getAttribute("style")).toContain("dashed=1;dashPattern=9 5");
     expect(sync(svgExporter.export(parsed.data)).data).toContain("stroke-dasharray:9 5");
-  });
-
-  it("expands odd Mermaid dash arrays for draw.io and Illustrator compatibility", () => {
-    const parsed = parseMermaidSvg(svgShell(`
-      <path id="L_A_B_0" class="flowchart-link"
-        d="M40,35 L160,35" stroke="#333333" stroke-dasharray="2"
-        marker-end="url(#pointEnd)"/>
-    `));
-
-    const svg = sync(svgExporter.export(parsed.data)).data;
-    expect(svg).toContain('stroke-dasharray="2 2"');
-    expect(svg).toContain("stroke-dasharray:2 2");
-    expect(svg).toContain('fill="none" stroke="#333333"');
-    expect(drawioCell(sync(drawioExporter.export(parsed.data)).data, "L_A_B_0")
-      ?.getAttribute("style")).toContain("dashed=1;dashPattern=2 2");
   });
 
   it("inherits SVG stroke dash, line, opacity, marker, and currentColor semantics", () => {

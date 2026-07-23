@@ -14,23 +14,11 @@ export interface NativeConnectorPatch {
   mode?: "faithful" | "smart";
 }
 
-export interface NativeNodeTextPatch {
-  elementId: string;
-  labelObjectName: string;
-  nodeObjectName: string;
-}
-
 export async function patchNativeConnectors(
   data: Uint8Array,
   patches: readonly NativeConnectorPatch[],
-  nodeTextPatches: readonly NativeNodeTextPatch[] = [],
-): Promise<{
-  data: Uint8Array;
-  diagnostics: ConversionDiagnostic[];
-  mergedNodeTexts: number;
-}> {
+): Promise<{ data: Uint8Array; diagnostics: ConversionDiagnostic[] }> {
   const diagnostics: ConversionDiagnostic[] = [];
-  let mergedNodeTexts = 0;
   try {
     const zip = await JSZip.loadAsync(data);
     const slideName = "ppt/slides/slide1.xml";
@@ -45,30 +33,6 @@ export async function patchNativeConnectors(
       const values = namedShapes.get(name) ?? [];
       values.push(shape);
       namedShapes.set(name, values);
-    }
-
-    for (const patch of nodeTextPatches) {
-      const nodeShapes = namedShapes.get(patch.nodeObjectName) ?? [];
-      const labelShapes = namedShapes.get(patch.labelObjectName) ?? [];
-      const nodeShape = nodeShapes[0];
-      const labelShape = labelShapes[0];
-      const textBody = labelShape?.getElementsByTagName("p:txBody")[0];
-      if (nodeShapes.length !== 1 || labelShapes.length !== 1 || !nodeShape || !labelShape
-        || !labelShape.parentNode || !textBody) {
-        diagnostics.push({
-          code: "PPTX_NODE_TEXT_MERGE_FALLBACK",
-          elementId: patch.elementId,
-          message: `Node text for ${patch.elementId} remains a separate editable text box because it could not be merged into its node shape.`,
-          severity: "warning",
-        });
-        continue;
-      }
-      for (const existing of Array.from(nodeShape.getElementsByTagName("p:txBody"))) {
-        if (existing.parentNode === nodeShape) nodeShape.removeChild(existing);
-      }
-      nodeShape.appendChild(textBody.cloneNode(true));
-      labelShape.parentNode.removeChild(labelShape);
-      mergedNodeTexts += 1;
     }
 
     for (const patch of patches) {
@@ -116,7 +80,6 @@ export async function patchNativeConnectors(
     return {
       data: await zip.generateAsync({ compression: "DEFLATE", type: "uint8array" }),
       diagnostics,
-      mergedNodeTexts,
     };
   } catch (error) {
     diagnostics.push({
@@ -124,7 +87,7 @@ export async function patchNativeConnectors(
       message: `Native connector post-processing was skipped and the original visual shapes were retained: ${error instanceof Error ? error.message : String(error)}`,
       severity: "warning",
     });
-    return { data, diagnostics, mergedNodeTexts: 0 };
+    return { data, diagnostics };
   }
 }
 

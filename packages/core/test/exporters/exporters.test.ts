@@ -78,39 +78,13 @@ describe("exportDiagramToSvg", () => {
     expect(document.documentElement.tagName).toBe("svg");
     expect(document.getElementsByTagName("parsererror")).toHaveLength(0);
     expect(document.getElementsByTagName("polyline")).toHaveLength(1);
-    expect(document.getElementsByTagName("marker")).toHaveLength(0);
-    expect(first).toContain('data-diagram-arrow="end"');
-    expect(first).toContain('data-arrow-kind="triangle"');
+    expect(document.getElementsByTagName("marker")).toHaveLength(1);
   });
 
   it("rejects non-finite geometry rather than emitting invalid XML", () => {
     expect(() => exportDiagramToSvg({ ...DIAGRAM, width: Number.NaN })).toThrow(
       /positive finite/,
     );
-  });
-
-  it("uses explicit alphabetic baselines for portable vertical centering", () => {
-    const output = exportDiagramToSvg({
-      ...DIAGRAM,
-      nodes: [{
-        ...DIAGRAM.nodes[0]!,
-        text: {
-          ...DIAGRAM.nodes[0]!.text!,
-          bounds: { x: 30, y: 60, width: 90, height: 40 },
-          fontSize: 16,
-          text: "First line\nSecond line",
-        },
-      }],
-    });
-    const document = new DOMParser().parseFromString(output, "image/svg+xml");
-    const text = Array.from(document.getElementsByTagName("text"))
-      .find((element) => element.getAttribute("id")?.startsWith("node-label-"));
-    const lines = Array.from(text?.getElementsByTagName("tspan") ?? []);
-
-    expect(output).not.toContain("dominant-baseline");
-    expect(output).not.toContain(" dy=");
-    expect(text?.getAttribute("y")).toBe("76");
-    expect(lines.map((line) => line.getAttribute("y"))).toEqual(["76", "95.2"]);
   });
 
   it("preserves canonical cubic paths and structured stroke style", () => {

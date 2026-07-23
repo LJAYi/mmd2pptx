@@ -8,6 +8,7 @@ import {
 import mermaid from "mermaid";
 
 import { EXAMPLE_DIAGRAM, MINI_EXAMPLE } from "./example.js";
+import { SvgLayoutEditor, type LayoutEditorState } from "./layout/index.js";
 import { SvgPanZoomViewer } from "./svg-viewer.js";
 import "./styles.css";
 
@@ -16,6 +17,7 @@ type ExportFormat = "drawio" | "json-canvas" | "pptx" | "svg";
 type PptxMode = "exact" | "faithful" | "smart";
 
 const MAX_MERMAID_FILE_BYTES = 1024 * 1024;
+const MAX_LAYOUT_FILE_BYTES = 5 * 1024 * 1024;
 
 const EXPORT_FORMATS = {
   drawio: {
@@ -187,6 +189,44 @@ app.innerHTML = `
               <p>Add a Mermaid diagram to see it here.</p>
             </div>
             <div id="viewer-feedback" class="viewer-feedback" role="status" aria-live="polite"></div>
+            <div class="layout-toolbar" role="toolbar" aria-label="Layout adjustment controls">
+              <button id="layout-toggle" type="button" aria-pressed="false" title="Adjust node positions">
+                Adjust layout
+              </button>
+              <span class="toolbar-divider" aria-hidden="true"></span>
+              <button id="layout-undo" class="layout-icon-button" type="button" aria-label="Undo layout change" title="Undo layout change (⌘Z)" disabled>↶</button>
+              <button id="layout-redo" class="layout-icon-button" type="button" aria-label="Redo layout change" title="Redo layout change (⇧⌘Z)" disabled>↷</button>
+              <button id="layout-reset" type="button" title="Restore Mermaid automatic layout" disabled>Reset</button>
+              <button id="layout-route-edge" type="button" title="Route the selected edge around nodes" disabled>Auto-route</button>
+              <select id="layout-arrange" aria-label="Align or distribute selected nodes" title="Align or distribute selected nodes" disabled>
+                <option value="">Arrange…</option>
+                <option value="left">Align left</option>
+                <option value="center">Align center</option>
+                <option value="right">Align right</option>
+                <option value="top">Align top</option>
+                <option value="middle">Align middle</option>
+                <option value="bottom">Align bottom</option>
+                <option value="horizontal">Distribute horizontally</option>
+                <option value="vertical">Distribute vertically</option>
+              </select>
+              <select id="layout-layer" aria-label="Change selected node layer" title="Change selected node layer" disabled>
+                <option value="">Layer…</option>
+                <option value="front">Bring to front</option>
+                <option value="forward">Bring forward</option>
+                <option value="backward">Send backward</option>
+                <option value="back">Send to back</option>
+              </select>
+              <button id="layout-group" type="button" title="Group selected nodes" disabled>Group</button>
+              <button id="layout-ungroup" type="button" title="Ungroup the selected container" disabled>Ungroup</button>
+              <span class="toolbar-divider" aria-hidden="true"></span>
+              <button id="layout-import" type="button" title="Import a .layout.json sidecar">Import</button>
+              <button id="layout-export" type="button" title="Export a .layout.json sidecar">Save layout</button>
+              <label class="layout-persist" title="Recover this source's layout after a reload">
+                <input id="layout-persist" type="checkbox" checked /> Auto-save
+              </label>
+              <button id="layout-clear-saved" type="button" title="Clear the saved layout for this Mermaid source" disabled>Clear saved</button>
+              <input id="layout-file" type="file" accept=".json,.layout.json,application/json" hidden />
+            </div>
             <div class="preview-toolbar" role="toolbar" aria-label="Diagram view controls">
               <button data-viewer-action="zoom-out" type="button" aria-label="Zoom out" title="Zoom out (−)" aria-keyshortcuts="-">
                 <span aria-hidden="true">−</span>
@@ -218,7 +258,7 @@ app.innerHTML = `
             </div>
           </div>
           <footer class="panel-footer preview-footer">
-            <span>Vector preview · local conversion</span>
+            <span id="layout-status">Mermaid automatic layout</span>
             <button id="fit-preview" class="text-button" type="button">Fit to view</button>
           </footer>
         </article>
@@ -306,7 +346,22 @@ const elements = {
   fitPreview: required<HTMLButtonElement>("#fit-preview"),
   fullExample: required<HTMLButtonElement>("#full-example"),
   layout: required<HTMLSelectElement>("#layout"),
+  layoutArrange: required<HTMLSelectElement>("#layout-arrange"),
+  layoutClearSaved: required<HTMLButtonElement>("#layout-clear-saved"),
   layoutField: required<HTMLElement>("#pptx-layout-field"),
+  layoutExport: required<HTMLButtonElement>("#layout-export"),
+  layoutFile: required<HTMLInputElement>("#layout-file"),
+  layoutGroup: required<HTMLButtonElement>("#layout-group"),
+  layoutImport: required<HTMLButtonElement>("#layout-import"),
+  layoutLayer: required<HTMLSelectElement>("#layout-layer"),
+  layoutPersist: required<HTMLInputElement>("#layout-persist"),
+  layoutRedo: required<HTMLButtonElement>("#layout-redo"),
+  layoutReset: required<HTMLButtonElement>("#layout-reset"),
+  layoutRouteEdge: required<HTMLButtonElement>("#layout-route-edge"),
+  layoutStatus: required<HTMLSpanElement>("#layout-status"),
+  layoutToggle: required<HTMLButtonElement>("#layout-toggle"),
+  layoutUndo: required<HTMLButtonElement>("#layout-undo"),
+  layoutUngroup: required<HTMLButtonElement>("#layout-ungroup"),
   metrics: {
     editable: required<HTMLElement>("#metric-editable"),
     edges: required<HTMLElement>("#metric-edges"),
@@ -330,6 +385,12 @@ const elements = {
 const svgViewer = new SvgPanZoomViewer({
   getSource: () => elements.source.value,
   root: elements.previewStage,
+});
+const layoutEditor = new SvgLayoutEditor({
+  onGeometryChange: () => svgViewer.refreshDimensions(),
+  onLayoutMutation: scheduleReadinessCheck,
+  onStateChange: updateLayoutControls,
+  viewport: required<HTMLElement>("#preview-viewport"),
 });
 
 const repositoryUrl = import.meta.env.VITE_REPOSITORY_URL;
@@ -374,11 +435,62 @@ elements.pptxMode.addEventListener("change", scheduleReadinessCheck);
 elements.fullExample.addEventListener("click", () => loadExample(EXAMPLE_DIAGRAM));
 elements.miniExample.addEventListener("click", () => loadExample(MINI_EXAMPLE));
 elements.fitPreview.addEventListener("click", () => svgViewer.fit());
+elements.layoutToggle.addEventListener("click", () => layoutEditor.toggleEditing());
+elements.layoutUndo.addEventListener("click", () => layoutEditor.undo());
+elements.layoutRedo.addEventListener("click", () => layoutEditor.redo());
+elements.layoutReset.addEventListener("click", () => {
+  layoutEditor.resetAutomaticLayout();
+  scheduleReadinessCheck();
+});
+elements.layoutRouteEdge.addEventListener("click", () => {
+  layoutEditor.routeSelectedEdge();
+  scheduleReadinessCheck();
+});
+elements.layoutArrange.addEventListener("change", () => {
+  const action = elements.layoutArrange.value;
+  elements.layoutArrange.value = "";
+  if (action) layoutEditor.arrangeSelection(
+    action as Parameters<SvgLayoutEditor["arrangeSelection"]>[0],
+  );
+});
+elements.layoutLayer.addEventListener("change", () => {
+  const action = elements.layoutLayer.value;
+  elements.layoutLayer.value = "";
+  if (action) layoutEditor.changeLayerOrder(
+    action as Parameters<SvgLayoutEditor["changeLayerOrder"]>[0],
+  );
+});
+elements.layoutGroup.addEventListener("click", () => layoutEditor.createGroupFromSelection());
+elements.layoutUngroup.addEventListener("click", () => layoutEditor.ungroupSelection());
+elements.layoutImport.addEventListener("click", () => elements.layoutFile.click());
+elements.layoutPersist.addEventListener("change", () => {
+  layoutEditor.setPersistenceEnabled(elements.layoutPersist.checked);
+});
+elements.layoutClearSaved.addEventListener("click", () => {
+  layoutEditor.clearSavedLayout();
+  scheduleReadinessCheck();
+});
+elements.layoutExport.addEventListener("click", () => {
+  downloadBlob(
+    new Blob([layoutEditor.exportSidecar()], { type: "application/json" }),
+    normalizedLayoutFileName(),
+  );
+});
+elements.layoutFile.addEventListener("change", () => void importLayoutFile());
 elements.exportButton.addEventListener("click", () => void exportCurrentFormat());
 window.addEventListener("keydown", (event) => {
   if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
     event.preventDefault();
     if (!elements.exportButton.disabled) void exportCurrentFormat();
+  }
+  if (
+    (event.metaKey || event.ctrlKey) &&
+    event.key.toLowerCase() === "z" &&
+    !isTextEntry(event.target)
+  ) {
+    event.preventDefault();
+    if (event.shiftKey) layoutEditor.redo();
+    else layoutEditor.undo();
   }
 });
 
@@ -424,6 +536,7 @@ async function renderDiagram(): Promise<void> {
   if (!source) {
     elements.preview.replaceChildren();
     svgViewer.clear();
+    layoutEditor.clear();
     elements.emptyState.hidden = false;
     lastState = { diagnostics: [], syntaxError: "Enter Mermaid source to continue." };
     setRenderState("waiting", "Waiting");
@@ -478,6 +591,7 @@ async function renderDiagram(): Promise<void> {
       svg.setAttribute("role", "img");
       svg.setAttribute("aria-label", "Rendered Mermaid diagram");
       svgViewer.setSvg(svg);
+      layoutEditor.setSvg(svg, source, semantics);
     }
     setRenderState("ready", "Rendered");
     await inspectConversion();
@@ -486,6 +600,7 @@ async function renderDiagram(): Promise<void> {
     const message = readableError(error);
     elements.preview.replaceChildren();
     svgViewer.clear();
+    layoutEditor.clear();
     semantics = undefined;
     semanticDiagnostics = [];
     elements.emptyState.hidden = false;
@@ -505,7 +620,8 @@ async function inspectConversion(): Promise<void> {
   try {
     const parsed = parseMermaidSvgElement(svg, semantics ? { semantics } : {});
     const core = await import("@mmd2pptx/core");
-    const diagram = parsed.data;
+    const laidOut = core.applyLayoutSidecar(parsed.data, layoutEditor.getSidecar());
+    const diagram = laidOut.data;
     const format = selectedFormat;
     const commonOptions = { backgroundColor: elements.background.value };
     let preflight;
@@ -540,6 +656,7 @@ async function inspectConversion(): Promise<void> {
       diagnostics: [
         ...semanticDiagnostics,
         ...parsed.diagnostics,
+        ...laidOut.diagnostics,
         ...preflight.diagnostics,
       ],
       summary: preflight.summary,
@@ -638,7 +755,8 @@ async function exportCurrentFormat(): Promise<void> {
 
     // Exporters are loaded only when requested; PowerPoint remains the heaviest path.
     const core = await import("@mmd2pptx/core");
-    const diagram = parsed.data;
+    const laidOut = core.applyLayoutSidecar(parsed.data, layoutEditor.getSidecar());
+    const diagram = laidOut.data;
     const commonOptions = { backgroundColor: elements.background.value };
     const result = format === "pptx"
       ? pptxMode === "exact"
@@ -668,6 +786,7 @@ async function exportCurrentFormat(): Promise<void> {
     const outputDiagnostics = [
       ...semanticDiagnostics,
       ...parsed.diagnostics,
+      ...laidOut.diagnostics,
       ...result.diagnostics,
     ];
     const requestIsCurrent = sourceAtStart === elements.source.value
@@ -733,6 +852,25 @@ function normalizedFileName(format: ExportFormat = selectedExportFormat()): stri
   return `${normalizedBaseName()}${EXPORT_FORMATS[format].extension}`;
 }
 
+function normalizedLayoutFileName(): string {
+  return `${normalizedBaseName()}.layout.json`;
+}
+
+async function importLayoutFile(): Promise<void> {
+  const file = elements.layoutFile.files?.[0];
+  elements.layoutFile.value = "";
+  if (!file) return;
+  try {
+    if (file.size > MAX_LAYOUT_FILE_BYTES) {
+      throw new Error("Layout sidecars must be 5 MiB or smaller.");
+    }
+    layoutEditor.importSidecar(await file.text());
+    scheduleReadinessCheck();
+  } catch (error) {
+    elements.layoutStatus.textContent = `Layout import failed: ${readableError(error)}`;
+  }
+}
+
 async function importMermaidFile(): Promise<void> {
   const file = elements.sourceFile.files?.[0];
   elements.sourceFile.value = "";
@@ -749,12 +887,51 @@ async function importMermaidFile(): Promise<void> {
     updateDiagnostics(lastState);
     return;
   }
+  layoutEditor.loadPersistedForNextSource();
   elements.source.value = await file.text();
   const baseName = file.name.replace(/\.(?:mmd|mermaid)$/i, "").trim();
   if (baseName) elements.fileName.value = baseName;
   updateSourceCount();
   scheduleRender(0);
   elements.source.focus();
+}
+
+function updateLayoutControls(state: LayoutEditorState): void {
+  elements.layoutToggle.disabled = !state.hasDiagram;
+  elements.layoutToggle.setAttribute("aria-pressed", String(state.editing));
+  elements.layoutToggle.textContent = state.editing ? "Done adjusting" : "Adjust layout";
+  elements.layoutUndo.disabled = !state.canUndo;
+  elements.layoutRedo.disabled = !state.canRedo;
+  elements.layoutReset.disabled = !state.hasOverrides;
+  elements.layoutRouteEdge.disabled = !state.selectedEdgeId;
+  elements.layoutArrange.disabled = state.selectedNodeCount < 2;
+  elements.layoutLayer.disabled = state.selectedNodeCount < 1;
+  elements.layoutGroup.disabled = !state.canGroup;
+  elements.layoutUngroup.disabled = !state.canUngroup;
+  elements.layoutExport.disabled = !state.hasDiagram;
+  elements.layoutImport.disabled = !state.hasDiagram;
+  elements.layoutPersist.checked = state.persistenceEnabled;
+  elements.layoutClearSaved.disabled = !state.hasSavedLayout;
+  elements.layoutStatus.classList.toggle("has-collision", state.collisionCount > 0);
+  elements.layoutStatus.textContent = state.collisionCount > 0
+    ? `${state.collisionCount} overlapping nodes · positions kept`
+    : state.routingWarnings.length > 0
+      ? `Routing note · ${state.routingWarnings[0]}`
+    : state.editing
+    ? state.selectedGroupId
+      ? `Adjusting group ${state.selectedGroupId} · drag, resize, or ungroup`
+      : state.selectedNodeId
+      ? state.selectedNodeCount > 1
+        ? `${state.selectedNodeCount} nodes selected · drag, align, distribute, or change layer`
+        : `Adjusting ${state.selectedNodeId} · drag, resize, or use arrow keys`
+      : state.selectedEdgeId
+        ? `Adjusting ${state.selectedEdgeId} · choose ports or drag its path/label`
+        : "Adjust mode · select a node or edge"
+    : state.hasOverrides
+      ? state.persistenceEnabled && state.hasSavedLayout
+        ? "Custom layout · auto-saved for this Mermaid source"
+        : "Custom layout · save the sidecar to reuse it"
+      : "Mermaid automatic layout";
 }
 
 function selectedExportFormat(): ExportFormat {
@@ -790,8 +967,29 @@ function isSupportedForwardDiagram(diagramType: string | undefined): boolean {
 
 function serializeLiveSvgForExport(svg: SVGSVGElement): string {
   const clone = svg.cloneNode(true) as SVGSVGElement;
+  clone.querySelector(".layout-overlay")?.remove();
+  for (const handle of clone.querySelectorAll("[data-layout-handle]")) handle.remove();
+  for (const element of clone.querySelectorAll(
+    ".layout-node-manual, .layout-node-selected, .layout-node-collision, .layout-edge-selected",
+  )) {
+    element.classList.remove(
+      "layout-node-manual",
+      "layout-node-selected",
+      "layout-node-collision",
+      "layout-edge-selected",
+    );
+  }
   clone.setAttribute("xmlns", "http://www.w3.org/2000/svg");
   return new XMLSerializer().serializeToString(clone);
+}
+
+function isTextEntry(target: EventTarget | null): boolean {
+  return (
+    target instanceof HTMLInputElement ||
+    target instanceof HTMLTextAreaElement ||
+    target instanceof HTMLSelectElement ||
+    (target instanceof HTMLElement && target.isContentEditable)
+  );
 }
 
 function downloadBlob(blob: Blob, fileName: string): void {
