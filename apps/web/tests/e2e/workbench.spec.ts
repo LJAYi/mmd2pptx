@@ -31,6 +31,23 @@ test("renders the synthetic default and downloads a non-empty PowerPoint ZIP", a
   await expect(page.locator("#export span")).toHaveText("Downloaded");
 });
 
+test("offers quick links to related diagram editors", async ({ page }) => {
+  await page.goto("/");
+
+  const links = [
+    { href: "https://mermaid.live/", name: "Mermaid Live" },
+    { href: "https://editsvgcode.com/", name: "SVG Code Editor" },
+    { href: "https://app.diagrams.net/", name: "diagrams.net" },
+  ];
+
+  for (const link of links) {
+    const element = page.getByRole("link", { name: new RegExp(link.name, "i") });
+    await expect(element).toHaveAttribute("href", link.href);
+    await expect(element).toHaveAttribute("target", "_blank");
+    await expect(element).toHaveAttribute("rel", "noopener noreferrer");
+  }
+});
+
 test("blocks export when the Mermaid source is invalid", async ({ page }) => {
   await page.goto("/");
   await expect(page.locator("#render-state b")).toHaveText("Rendered");
