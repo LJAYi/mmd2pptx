@@ -252,6 +252,36 @@ app.innerHTML = `
           <small>No upload. No account. No diagram data retained.</small>
         </div>
       </section>
+
+      <section class="quick-links" aria-labelledby="quick-links-title">
+        <div class="quick-links-copy">
+          <p class="eyebrow">QUICK LINKS</p>
+          <h2 id="quick-links-title">Continue in another diagram tool.</h2>
+        </div>
+        <nav class="quick-link-list" aria-label="External diagram tools">
+          <a href="https://mermaid.live/" target="_blank" rel="noopener noreferrer">
+            <span>
+              <strong>Mermaid Live</strong>
+              <small>Edit and validate Mermaid source</small>
+            </span>
+            <i aria-hidden="true">↗</i>
+          </a>
+          <a href="https://editsvgcode.com/" target="_blank" rel="noopener noreferrer">
+            <span>
+              <strong>SVG Code Editor</strong>
+              <small>Inspect and refine exported SVG</small>
+            </span>
+            <i aria-hidden="true">↗</i>
+          </a>
+          <a href="https://app.diagrams.net/" target="_blank" rel="noopener noreferrer">
+            <span>
+              <strong>diagrams.net</strong>
+              <small>Open and edit draw.io files</small>
+            </span>
+            <i aria-hidden="true">↗</i>
+          </a>
+        </nav>
+      </section>
     </main>
 
     <footer class="site-footer">
