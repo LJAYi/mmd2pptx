@@ -85,57 +85,6 @@ app.innerHTML = `
         <p class="intro-copy">Turn Mermaid flowcharts into PowerPoint slides made of real shapes, connectors, and text—not a flattened screenshot.</p>
       </section>
 
-      <section class="controls-card" aria-label="Export settings">
-        <label class="field filename-field">
-          <span>File name</span>
-          <span class="input-suffix-wrap">
-            <input id="file-name" value="mmd2pptx-diagram" autocomplete="off" spellcheck="false" />
-            <small id="file-suffix">.pptx</small>
-          </span>
-        </label>
-        <label class="field">
-          <span>Export format</span>
-          <select id="export-format">
-            <option value="pptx">PowerPoint (.pptx)</option>
-            <option value="svg">SVG (.svg)</option>
-            <option value="drawio">draw.io (.drawio)</option>
-            <option value="json-canvas">JSON Canvas (.canvas)</option>
-          </select>
-        </label>
-        <label class="field" id="pptx-mode-field">
-          <span>PPTX mode</span>
-          <select id="pptx-mode">
-            <option value="smart">Smart — editable connectors</option>
-            <option value="faithful">Faithful — visual geometry</option>
-            <option value="exact">Exact — one SVG object</option>
-          </select>
-        </label>
-        <label class="field" id="pptx-layout-field">
-          <span>Mermaid theme</span>
-          <select id="theme">
-            <option value="base">Base</option>
-            <option value="neutral">Neutral</option>
-            <option value="default">Default</option>
-            <option value="forest">Forest</option>
-            <option value="dark">Dark</option>
-          </select>
-        </label>
-        <label class="field color-field">
-          <span>Slide background</span>
-          <span class="color-control">
-            <input id="background" type="color" value="#ffffff" />
-            <output id="background-value" for="background">#FFFFFF</output>
-          </span>
-        </label>
-        <label class="field">
-          <span>Slide format</span>
-          <select id="layout">
-            <option value="wide">Widescreen 16:9</option>
-            <option value="standard">Standard 4:3</option>
-          </select>
-        </label>
-      </section>
-
       <section class="workspace" aria-label="Mermaid conversion workspace">
         <article class="panel editor-panel">
           <div class="panel-head">
@@ -222,6 +171,57 @@ app.innerHTML = `
             <button id="fit-preview" class="text-button" type="button">Fit to view</button>
           </footer>
         </article>
+      </section>
+
+      <section class="controls-card" aria-label="Export settings">
+        <label class="field filename-field">
+          <span>File name</span>
+          <span class="input-suffix-wrap">
+            <input id="file-name" value="mmd2pptx-diagram" autocomplete="off" spellcheck="false" />
+            <small id="file-suffix">.pptx</small>
+          </span>
+        </label>
+        <label class="field">
+          <span>Export format</span>
+          <select id="export-format">
+            <option value="pptx">PowerPoint (.pptx)</option>
+            <option value="svg">SVG (.svg)</option>
+            <option value="drawio">draw.io (.drawio)</option>
+            <option value="json-canvas">JSON Canvas (.canvas)</option>
+          </select>
+        </label>
+        <label class="field" id="pptx-mode-field">
+          <span>PPTX mode</span>
+          <select id="pptx-mode">
+            <option value="smart">Smart — editable connectors</option>
+            <option value="faithful">Faithful — visual geometry</option>
+            <option value="exact">Exact — one SVG object</option>
+          </select>
+        </label>
+        <label class="field" id="pptx-layout-field">
+          <span>Mermaid theme</span>
+          <select id="theme">
+            <option value="base">Base</option>
+            <option value="neutral">Neutral</option>
+            <option value="default">Default</option>
+            <option value="forest">Forest</option>
+            <option value="dark">Dark</option>
+          </select>
+        </label>
+        <label class="field color-field">
+          <span>Slide background</span>
+          <span class="color-control">
+            <input id="background" type="color" value="#ffffff" />
+            <output id="background-value" for="background">#FFFFFF</output>
+          </span>
+        </label>
+        <label class="field">
+          <span>Slide format</span>
+          <select id="layout">
+            <option value="wide">Widescreen 16:9</option>
+            <option value="standard">Standard 4:3</option>
+          </select>
+        </label>
       </section>
 
       <section class="export-row">

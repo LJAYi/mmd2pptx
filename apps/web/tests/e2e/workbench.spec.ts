@@ -48,6 +48,17 @@ test("offers quick links to related diagram editors", async ({ page }) => {
   }
 });
 
+test("places export settings below the source and preview workspace", async ({ page }) => {
+  await page.goto("/");
+
+  const sectionClasses = await page.locator("main > section").evaluateAll((sections) =>
+    sections.map((section) => section.className)
+  );
+  expect(sectionClasses).toContain("workspace");
+  expect(sectionClasses).toContain("controls-card");
+  expect(sectionClasses.indexOf("workspace")).toBeLessThan(sectionClasses.indexOf("controls-card"));
+});
+
 test("blocks export when the Mermaid source is invalid", async ({ page }) => {
   await page.goto("/");
   await expect(page.locator("#render-state b")).toHaveText("Rendered");
