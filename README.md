@@ -11,7 +11,7 @@ labels, and connectors become native PowerPoint objects where possible, and the
 conversion result reports diagnostics instead of silently producing an empty
 slide.
 
-> **Status:** v0.2.3. The web app and CLI accept Mermaid source, while the core
+> **Status:** v0.2.4. The web app and CLI accept Mermaid source, while the core
 > SDK converts Mermaid-rendered SVG. The API and rendering coverage may still
 > evolve before 1.0.
 

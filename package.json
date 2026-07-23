@@ -1,6 +1,6 @@
 {
   "name": "@mmd2pptx/workspace",
-  "version": "0.2.3",
+  "version": "0.2.4",
   "description": "Convert Mermaid diagrams into editable PowerPoint presentations.",
   "homepage": "https://ljayi.github.io/mmd2pptx/",
   "repository": {
