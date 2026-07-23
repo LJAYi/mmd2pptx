@@ -93,7 +93,7 @@ h1 em { color: var(--accent); font-family: "Newsreader", Georgia, serif; font-we
 .intro-copy { margin: 0; color: var(--muted); font-size: 14px; line-height: 1.75; }
 
 .controls-card {
-  margin-bottom: 18px;
+  margin: 18px 0;
   padding: 17px 20px;
   border: 1px solid var(--line);
   border-radius: 12px;
