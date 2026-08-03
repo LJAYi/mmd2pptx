@@ -17,8 +17,10 @@ projects with similar functionality.
 4. Output-specific validators inspect the generated artifact and report explicit
    capability fallbacks.
 
-The browser application runs this pipeline locally. Diagram source does not
-leave the browser.
+The browser application runs this pipeline locally. Pasted and local-file
+source stays in the browser. GitHub-loaded source is retrieved by the proposed
+broker, which does not retain file contents; its mode-specific boundary is
+documented in [`github-app-mvp.md`](github-app-mvp.md).
 
 The following are deliberately deferred: draw.io-to-IR, PPTX-to-IR,
 SVG-to-Mermaid, and other reverse conversion paths.
