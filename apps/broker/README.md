@@ -36,9 +36,10 @@ For production, configure these values without committing them:
 | `BROKER_PUBLIC_URL` | Worker variable containing the exact HTTPS origin |
 
 The GitHub App must enable expiring user access tokens, use the exact deployed
-`/auth/github/callback` URL, and request only `Contents: read` for the read-only
-MVP. The production allowlist contains only `https://ljayi.github.io`; local
-origins belong in the untracked `.dev.vars` file.
+`/auth/github/callback` URL, and request no repository permissions for this
+installation-listing shell. The production allowlist contains only
+`https://ljayi.github.io`; local origins belong in the untracked `.dev.vars`
+file.
 
 Deployment is intentionally manual until a dedicated Cloudflare account,
 Worker URL, test GitHub App, secret-rotation procedure, and limited-release

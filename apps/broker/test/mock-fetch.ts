@@ -6,6 +6,7 @@ interface MockRoute {
   status: number;
   response: unknown;
   headers?: Record<string, string>;
+  responseHeaders?: Record<string, string>;
 }
 
 export class MockFetchRouter {
@@ -25,7 +26,10 @@ export class MockFetchRouter {
       if (index < 0) throw new Error(`No outbound mock for ${request.method} ${request.url}`);
       const route = this.routes.splice(index, 1)[0];
       if (!route) throw new Error("Outbound mock disappeared");
-      return Response.json(route.response, { status: route.status });
+      return Response.json(route.response, {
+        status: route.status,
+        ...(route.responseHeaders ? { headers: route.responseHeaders } : {}),
+      });
     });
   }
 
@@ -35,8 +39,16 @@ export class MockFetchRouter {
     status: number,
     response: unknown,
     headers?: Record<string, string>,
+    responseHeaders?: Record<string, string>,
   ): void {
-    this.routes.push({ method, url, status, response, ...(headers ? { headers } : {}) });
+    this.routes.push({
+      method,
+      url,
+      status,
+      response,
+      ...(headers ? { headers } : {}),
+      ...(responseHeaders ? { responseHeaders } : {}),
+    });
   }
 
   assertDone(): void {

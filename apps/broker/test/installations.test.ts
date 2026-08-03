@@ -1,6 +1,8 @@
-import { exports } from "cloudflare:workers";
+import { env, exports } from "cloudflare:workers";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import type { BrokerEnv } from "../src/contracts";
+import worker from "../src/index";
 import { sha256Base64Url } from "../src/crypto";
 import { MockFetchRouter } from "./mock-fetch";
 
@@ -14,8 +16,11 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  outbound.assertDone();
-  vi.restoreAllMocks();
+  try {
+    outbound.assertDone();
+  } finally {
+    vi.restoreAllMocks();
+  }
 });
 
 async function authenticatedHandle(expiresIn = 28_800): Promise<string> {
@@ -150,6 +155,92 @@ describe("installation listing", () => {
     });
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ items: [], next_cursor: null, has_more: false });
+
+    const session = await broker.fetch("https://broker.test/api/github/session", {
+      headers: { Authorization: `Bearer ${handle}`, Origin: origin },
+    });
+    expect(session.status).toBe(200);
+  });
+
+  it("follows a next-page link when rel is followed by another parameter", async () => {
+    const handle = await authenticatedHandle();
+    outbound.json(
+      "GET",
+      "https://api.github.test/user/installations?per_page=100&page=1",
+      200,
+      {
+        installations: [
+          {
+            id: 1,
+            account: {
+              id: 1,
+              login: "alpha",
+              avatar_url: "https://avatars.test/1",
+              type: "Organization",
+            },
+            repository_selection: "selected",
+            suspended_at: null,
+          },
+        ],
+      },
+      undefined,
+      {
+        Link: '<https://api.github.test/user/installations?per_page=100&page=2>; rel="next"; type="application/json"',
+      },
+    );
+    outbound.json(
+      "GET",
+      "https://api.github.test/user/installations?per_page=100&page=2",
+      200,
+      {
+        installations: [
+          {
+            id: 2,
+            account: {
+              id: 2,
+              login: "beta",
+              avatar_url: "https://avatars.test/2",
+              type: "Organization",
+            },
+            repository_selection: "selected",
+            suspended_at: null,
+          },
+        ],
+      },
+    );
+
+    const response = await broker.fetch("https://broker.test/api/github/installations", {
+      headers: { Authorization: `Bearer ${handle}`, Origin: origin },
+    });
+    expect(response.status).toBe(200);
+    const page = (await response.json()) as { items: Array<{ account: { login: string } }> };
+    expect(page.items.map((item) => item.account.login)).toEqual(["alpha", "beta"]);
+  });
+
+  it("reports an encryption-key misconfiguration without deleting the session", async () => {
+    const handle = await authenticatedHandle();
+    const brokenEnv: BrokerEnv = {
+      OAUTH_TRANSACTIONS: env.OAUTH_TRANSACTIONS,
+      AUTH_SESSIONS: env.AUTH_SESSIONS,
+      AUTH_RATE_LIMITER: env.AUTH_RATE_LIMITER,
+      SESSION_RATE_LIMITER: env.SESSION_RATE_LIMITER,
+      ALLOWED_ORIGINS: env.ALLOWED_ORIGINS,
+      BROKER_PUBLIC_URL: env.BROKER_PUBLIC_URL,
+      GITHUB_API_BASE_URL: env.GITHUB_API_BASE_URL,
+      GITHUB_OAUTH_BASE_URL: env.GITHUB_OAUTH_BASE_URL,
+      GITHUB_APP_CLIENT_ID: env.GITHUB_APP_CLIENT_ID,
+      GITHUB_APP_CLIENT_SECRET: env.GITHUB_APP_CLIENT_SECRET,
+      GITHUB_APP_SLUG: env.GITHUB_APP_SLUG,
+      SESSION_ENCRYPTION_KEY: "not valid base64",
+    };
+    const response = await worker.fetch(
+      new Request("https://broker.test/api/github/installations", {
+        headers: { Authorization: `Bearer ${handle}`, Origin: origin },
+      }),
+      brokenEnv,
+    );
+    expect(response.status).toBe(500);
+    expect(await response.json()).toMatchObject({ code: "BROKER_MISCONFIGURED" });
 
     const session = await broker.fetch("https://broker.test/api/github/session", {
       headers: { Authorization: `Bearer ${handle}`, Origin: origin },

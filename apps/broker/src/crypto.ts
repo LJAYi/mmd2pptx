@@ -3,6 +3,13 @@ import type { GitHubTokenSet } from "./contracts";
 const encoder = new TextEncoder();
 const decoder = new TextDecoder("utf-8", { fatal: true, ignoreBOM: false });
 
+export class EncryptionKeyError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "EncryptionKeyError";
+  }
+}
+
 export function base64UrlEncode(bytes: Uint8Array): string {
   let binary = "";
   for (const byte of bytes) binary += String.fromCharCode(byte);
@@ -43,9 +50,26 @@ export function constantTimeEqual(left: string, right: string): boolean {
 }
 
 async function importEncryptionKey(encodedKey: string): Promise<CryptoKey> {
-  const raw = Uint8Array.from(atob(encodedKey), (character) => character.charCodeAt(0));
-  if (raw.byteLength !== 32) throw new Error("SESSION_ENCRYPTION_KEY must contain 32 bytes");
-  return crypto.subtle.importKey("raw", raw, { name: "AES-GCM" }, false, ["encrypt", "decrypt"]);
+  let raw: Uint8Array;
+  try {
+    raw = Uint8Array.from(atob(encodedKey), (character) => character.charCodeAt(0));
+  } catch {
+    throw new EncryptionKeyError("SESSION_ENCRYPTION_KEY must be valid base64");
+  }
+  if (raw.byteLength !== 32) {
+    throw new EncryptionKeyError("SESSION_ENCRYPTION_KEY must contain 32 bytes");
+  }
+  try {
+    return await crypto.subtle.importKey(
+      "raw",
+      raw,
+      { name: "AES-GCM" },
+      false,
+      ["encrypt", "decrypt"],
+    );
+  } catch {
+    throw new EncryptionKeyError("SESSION_ENCRYPTION_KEY could not be imported");
+  }
 }
 
 export async function encryptTokenSet(

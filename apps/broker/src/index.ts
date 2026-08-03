@@ -7,6 +7,7 @@ import type {
 } from "./contracts";
 import {
   decryptTokenSet,
+  EncryptionKeyError,
   encryptTokenSet,
   isPkceChallenge,
   randomToken,
@@ -141,7 +142,12 @@ function sessionStub(env: BrokerEnv, handle: string): DurableObjectStub {
 }
 
 async function internalJson<T>(response: Response, fallbackCode: string): Promise<T> {
-  const value = (await response.json()) as { code?: string } & T;
+  let value: { code?: string } & T;
+  try {
+    value = (await response.json()) as { code?: string } & T;
+  } catch {
+    throw new BrokerProblem(502, fallbackCode, "The authentication service is temporarily unavailable");
+  }
   if (response.ok) return value;
   const code = value.code ?? fallbackCode;
   if (code === "TRANSACTION_EXPIRED" || code === "TRANSACTION_NOT_READY") {
@@ -180,11 +186,15 @@ async function accessToken(
   config: BrokerConfig,
   handle: string,
   session: StoredSession,
+  refreshRetry = 0,
 ): Promise<{ token: string; session: StoredSession }> {
   let tokens: GitHubTokenSet;
   try {
     tokens = await decryptTokenSet(session.encryptedTokens, env.SESSION_ENCRYPTION_KEY, handle);
-  } catch {
+  } catch (error) {
+    if (error instanceof EncryptionKeyError) {
+      throw new BrokerProblem(500, "BROKER_MISCONFIGURED", error.message);
+    }
     await deleteSession(env, handle);
     throw new BrokerProblem(401, "SESSION_EXPIRED", "GitHub authorization has expired");
   }
@@ -219,7 +229,10 @@ async function accessToken(
     throw new BrokerProblem(503, "BROKER_UNAVAILABLE", "The authentication service is temporarily busy");
   }
   if (leaseResult.status === "updated" && leaseResult.session) {
-    return accessToken(env, config, handle, leaseResult.session);
+    if (refreshRetry >= 1) {
+      throw new BrokerProblem(503, "BROKER_UNAVAILABLE", "The authentication service is temporarily busy");
+    }
+    return accessToken(env, config, handle, leaseResult.session, refreshRetry + 1);
   }
   if (leaseResult.status !== "acquired" || !leaseResult.lease) {
     throw new BrokerProblem(503, "BROKER_UNAVAILABLE", "The authentication service is temporarily busy");
@@ -252,6 +265,9 @@ async function accessToken(
       },
     );
     if (error instanceof BrokerProblem) throw error;
+    if (error instanceof EncryptionKeyError) {
+      throw new BrokerProblem(500, "BROKER_MISCONFIGURED", error.message);
+    }
     throw new BrokerProblem(401, "SESSION_EXPIRED", "GitHub authorization has expired");
   }
 }
@@ -281,14 +297,14 @@ function clearTransactionCookie(config: BrokerConfig): string {
   return `${cookie.name}=; Path=/; HttpOnly; ${cookie.secure ? "Secure; " : ""}SameSite=Lax; Max-Age=0`;
 }
 
-function completionHtml(completion: InternalCompletion): string {
+function completionHtml(completion: InternalCompletion): { html: string; nonce: string } {
   const nonce = randomToken(18);
   const message = JSON.stringify({
     type: "mmd2pptx:github-auth",
     exchangeCode: completion.exchangeCode,
   }).replaceAll("<", "\\u003c");
   const targetOrigin = JSON.stringify(completion.returnOrigin);
-  return `<!doctype html>
+  const html = `<!doctype html>
 <html lang="en">
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>GitHub connected</title></head>
 <body><p>GitHub authorization complete. You can close this window.</p>
@@ -298,6 +314,7 @@ if (window.opener) {
   window.close();
 }
 </script></body></html>`;
+  return { html, nonce };
 }
 
 async function route(request: Request, env: BrokerEnv): Promise<Response> {
@@ -388,9 +405,7 @@ async function route(request: Request, env: BrokerEnv): Promise<Response> {
     }
     const response = await transactionStub(env, state).fetch("https://transaction.internal/complete");
     const completion = await internalJson<InternalCompletion>(response, "BROKER_UNAVAILABLE");
-    const html = completionHtml(completion);
-    const nonceMatch = /nonce="([^"]+)"/u.exec(html);
-    const nonce = nonceMatch?.[1] ?? "";
+    const { html, nonce } = completionHtml(completion);
     return new Response(html, {
       headers: {
         "Cache-Control": "no-store",
@@ -429,8 +444,17 @@ async function route(request: Request, env: BrokerEnv): Promise<Response> {
     const actor = await github.getActor(tokens.accessToken);
     const handle = randomToken();
     const now = Date.now();
+    let encryptedTokens: string;
+    try {
+      encryptedTokens = await encryptTokenSet(tokens, env.SESSION_ENCRYPTION_KEY, handle);
+    } catch (error) {
+      if (error instanceof EncryptionKeyError) {
+        throw new BrokerProblem(500, "BROKER_MISCONFIGURED", error.message);
+      }
+      throw error;
+    }
     const session: StoredSession = {
-      encryptedTokens: await encryptTokenSet(tokens, env.SESSION_ENCRYPTION_KEY, handle),
+      encryptedTokens,
       actor,
       createdAt: now,
       expiresAt: now + sessionLifetimeMs,
@@ -538,8 +562,12 @@ export default {
     let origin: string | undefined;
     try {
       const candidate = request.headers.get("Origin");
-      if (candidate && env.ALLOWED_ORIGINS?.split(",").map((value) => value.trim()).includes(candidate)) {
-        origin = candidate;
+      if (candidate) {
+        try {
+          if (configFromEnv(env).allowedOrigins.has(candidate)) origin = candidate;
+        } catch {
+          origin = undefined;
+        }
       }
       return await route(request, env);
     } catch (error) {

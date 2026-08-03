@@ -8,6 +8,8 @@ import {
 
 const transactionTtlMs = 5 * 60 * 1000;
 const snapshotTtlMs = 5 * 60 * 1000;
+const refreshLeaseTtlMs = 30 * 1000;
+const sessionIdleMs = 30 * 60 * 1000;
 const pageSize = 50;
 
 interface OAuthTransaction {
@@ -47,7 +49,9 @@ export class OAuthTransactionObject implements DurableObject {
       if (existing) return json({ code: "TRANSACTION_EXISTS" }, 409);
       const now = Date.now();
       const transaction: OAuthTransaction = {
-        ...input,
+        state: input.state,
+        challenge: input.challenge,
+        returnOrigin: input.returnOrigin,
         createdAt: now,
         expiresAt: now + transactionTtlMs,
       };
@@ -188,7 +192,7 @@ export class AuthSessionObject implements DurableObject {
           return { status: "busy" } as const;
         }
         const lease = randomToken();
-        session.refreshLease = { id: lease, expiresAt: now + 30_000 };
+        session.refreshLease = { id: lease, expiresAt: now + refreshLeaseTtlMs };
         await storage.put("session", session);
         return { status: "acquired", lease } as const;
       });
@@ -316,7 +320,7 @@ export class AuthSessionObject implements DurableObject {
       return null;
     }
     if (touch) {
-      session.idleExpiresAt = Math.min(session.expiresAt, now + 30 * 60 * 1000);
+      session.idleExpiresAt = Math.min(session.expiresAt, now + sessionIdleMs);
       await this.state.storage.put("session", session);
       const snapshot = await this.state.storage.get<InstallationSnapshot>("installationSnapshot");
       await this.state.storage.setAlarm(

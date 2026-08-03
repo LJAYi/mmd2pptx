@@ -19,6 +19,7 @@ export function problemResponse(problem: BrokerProblem, requestId: string, origi
   });
   if (origin) {
     headers.set("Access-Control-Allow-Origin", origin);
+    headers.set("Access-Control-Expose-Headers", "X-Request-Id");
     headers.set("Vary", "Origin");
   }
   if (problem.code === "BROKER_RATE_LIMITED") headers.set("Retry-After", "60");

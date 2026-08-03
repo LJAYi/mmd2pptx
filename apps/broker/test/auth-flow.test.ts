@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { StoredSession } from "../src/contracts";
 import { sha256Base64Url } from "../src/crypto";
+import { GitHubClient } from "../src/github";
 import { MockFetchRouter } from "./mock-fetch";
 
 const origin = "https://app.test";
@@ -16,8 +17,11 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  outbound.assertDone();
-  vi.restoreAllMocks();
+  try {
+    outbound.assertDone();
+  } finally {
+    vi.restoreAllMocks();
+  }
 });
 
 async function beginAuthorization(): Promise<{ state: string; challenge: string }> {
@@ -186,5 +190,51 @@ describe("GitHub authentication shell", () => {
     expect(preflight.status).toBe(204);
     expect(preflight.headers.get("Access-Control-Allow-Origin")).toBe(origin);
     expect(preflight.headers.get("Access-Control-Allow-Headers")).toContain("Authorization");
+  });
+
+  it("reports non-expiring user tokens as a GitHub App configuration error", async () => {
+    const { state } = await beginAuthorization();
+    const exchangeCode = await stageAndComplete(state);
+    outbound.json("POST", "https://github.test/login/oauth/access_token", 200, {
+      access_token: "non-expiring-access-token",
+      token_type: "bearer",
+      scope: "",
+    });
+
+    const response = await broker.fetch("https://broker.test/auth/session/exchange", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Origin: origin },
+      body: JSON.stringify({ exchangeCode, codeVerifier: verifier }),
+    });
+    expect(response.status).toBe(500);
+    expect(await response.json()).toMatchObject({ code: "BROKER_MISCONFIGURED" });
+  });
+
+  it("distinguishes invalid GitHub App credentials from an expired authorization", async () => {
+    const { state } = await beginAuthorization();
+    const exchangeCode = await stageAndComplete(state);
+    outbound.json("POST", "https://github.test/login/oauth/access_token", 200, {
+      error: "invalid_client",
+    });
+
+    const response = await broker.fetch("https://broker.test/auth/session/exchange", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Origin: origin },
+      body: JSON.stringify({ exchangeCode, codeVerifier: verifier }),
+    });
+    expect(response.status).toBe(500);
+    expect(await response.json()).toMatchObject({ code: "BROKER_MISCONFIGURED" });
+  });
+
+  it("rejects unsafe GitHub base URL path prefixes", () => {
+    expect(
+      () => new GitHubClient({
+        apiBaseUrl: "https://api.github.test/v3",
+        oauthBaseUrl: "https://github.test",
+        clientId: "test-client-id",
+        clientSecret: "test-client-secret",
+        brokerPublicUrl: "https://broker.test",
+      }),
+    ).toThrow("GITHUB_API_BASE_URL is not a safe base URL");
   });
 });

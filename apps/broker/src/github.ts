@@ -25,6 +25,7 @@ const githubHeaders = {
   "X-GitHub-Api-Version": "2022-11-28",
 };
 const maxGitHubJsonBytes = 2 * 1024 * 1024;
+const githubRequestTimeoutMs = 10_000;
 
 function fixedBaseUrl(value: string, label: string): URL {
   let url: URL;
@@ -33,13 +34,31 @@ function fixedBaseUrl(value: string, label: string): URL {
   } catch {
     throw new BrokerProblem(500, "BROKER_MISCONFIGURED", `${label} is not a valid URL`);
   }
-  if (!/^https?:$/u.test(url.protocol) || url.username || url.password || url.search || url.hash) {
+  if (
+    !/^https?:$/u.test(url.protocol) ||
+    url.username ||
+    url.password ||
+    url.search ||
+    url.hash ||
+    url.pathname !== "/"
+  ) {
     throw new BrokerProblem(500, "BROKER_MISCONFIGURED", `${label} is not a safe base URL`);
   }
   return url;
 }
 
 function tokenSetFromResponse(value: GitHubTokenResponse, now: number): GitHubTokenSet {
+  if (
+    typeof value.access_token === "string" &&
+    value.refresh_token === undefined &&
+    value.refresh_token_expires_in === undefined
+  ) {
+    throw new BrokerProblem(
+      500,
+      "BROKER_MISCONFIGURED",
+      "GitHub App user access token expiration must be enabled",
+    );
+  }
   if (
     typeof value.access_token !== "string" ||
     typeof value.expires_in !== "number" ||
@@ -60,11 +79,50 @@ function tokenSetFromResponse(value: GitHubTokenResponse, now: number): GitHubTo
   };
 }
 
+async function githubFetch(url: URL, init: RequestInit, code: string): Promise<Response> {
+  try {
+    return await fetch(url, {
+      ...init,
+      signal: AbortSignal.timeout(githubRequestTimeoutMs),
+    });
+  } catch {
+    throw new BrokerProblem(502, code, "GitHub is temporarily unavailable");
+  }
+}
+
+async function boundedResponseText(response: Response, code: string): Promise<string> {
+  if (!response.body) return "";
+  const reader = response.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.byteLength;
+    if (total > maxGitHubJsonBytes) {
+      try {
+        await reader.cancel();
+      } catch {
+        // The size violation is the useful error even if stream cancellation fails.
+      }
+      throw new BrokerProblem(502, code, "GitHub returned an oversized response");
+    }
+    chunks.push(value);
+  }
+  const bytes = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return new TextDecoder("utf-8", { fatal: true, ignoreBOM: false }).decode(bytes);
+}
+
 async function parseJsonResponse<T>(response: Response, code: string): Promise<T> {
   if (!response.ok) {
     if (
       response.status === 429 ||
-      response.status === 403 && response.headers.get("X-RateLimit-Remaining") === "0"
+      (response.status === 403 && response.headers.get("X-RateLimit-Remaining") === "0")
     ) {
       throw new BrokerProblem(429, "GITHUB_RATE_LIMITED", "GitHub rate limit exceeded");
     }
@@ -78,10 +136,7 @@ async function parseJsonResponse<T>(response: Response, code: string): Promise<T
     throw new BrokerProblem(502, code, "GitHub returned an oversized response");
   }
   try {
-    const text = await response.text();
-    if (new TextEncoder().encode(text).byteLength > maxGitHubJsonBytes) {
-      throw new BrokerProblem(502, code, "GitHub returned an oversized response");
-    }
+    const text = await boundedResponseText(response, code);
     return JSON.parse(text) as T;
   } catch (error) {
     if (error instanceof BrokerProblem) throw error;
@@ -92,16 +147,21 @@ async function parseJsonResponse<T>(response: Response, code: string): Promise<T
 export class GitHubClient {
   private readonly apiBase: URL;
   private readonly oauthBase: URL;
+  private readonly redirectUri: string;
 
   constructor(private readonly config: GitHubClientConfig) {
     this.apiBase = fixedBaseUrl(config.apiBaseUrl, "GITHUB_API_BASE_URL");
     this.oauthBase = fixedBaseUrl(config.oauthBaseUrl, "GITHUB_OAUTH_BASE_URL");
+    this.redirectUri = new URL(
+      "/auth/github/callback",
+      fixedBaseUrl(config.brokerPublicUrl, "BROKER_PUBLIC_URL"),
+    ).toString();
   }
 
   authorizationUrl(state: string, challenge: string): string {
     const url = new URL("/login/oauth/authorize", this.oauthBase);
     url.searchParams.set("client_id", this.config.clientId);
-    url.searchParams.set("redirect_uri", `${this.config.brokerPublicUrl}/auth/github/callback`);
+    url.searchParams.set("redirect_uri", this.redirectUri);
     url.searchParams.set("state", state);
     url.searchParams.set("code_challenge", challenge);
     url.searchParams.set("code_challenge_method", "S256");
@@ -114,7 +174,7 @@ export class GitHubClient {
       client_secret: this.config.clientSecret,
       code,
       code_verifier: verifier,
-      redirect_uri: `${this.config.brokerPublicUrl}/auth/github/callback`,
+      redirect_uri: this.redirectUri,
     });
   }
 
@@ -129,9 +189,9 @@ export class GitHubClient {
 
   private async exchangeToken(payload: Record<string, string>): Promise<GitHubTokenSet> {
     const url = new URL("/login/oauth/access_token", this.oauthBase);
-    let response: Response;
-    try {
-      response = await fetch(url, {
+    const response = await githubFetch(
+      url,
+      {
         method: "POST",
         headers: {
           Accept: "application/json",
@@ -139,22 +199,29 @@ export class GitHubClient {
           "User-Agent": githubHeaders["User-Agent"],
         },
         body: JSON.stringify(payload),
-      });
-    } catch {
-      throw new BrokerProblem(502, "GITHUB_AUTH_FAILED", "GitHub is temporarily unavailable");
-    }
+      },
+      "GITHUB_AUTH_FAILED",
+    );
     const value = await parseJsonResponse<GitHubTokenResponse>(response, "GITHUB_AUTH_FAILED");
-    if (value.error) {
+    if (value.error === "invalid_client" || value.error === "incorrect_client_credentials") {
+      throw new BrokerProblem(500, "BROKER_MISCONFIGURED", "GitHub App credentials are invalid");
+    }
+    if (value.error === "invalid_grant" || value.error === "bad_verification_code") {
       throw new BrokerProblem(401, "SESSION_EXPIRED", "GitHub authorization has expired");
+    }
+    if (typeof value.error === "string") {
+      throw new BrokerProblem(502, "GITHUB_AUTH_FAILED", "GitHub authorization failed");
     }
     return tokenSetFromResponse(value, Date.now());
   }
 
   async getActor(accessToken: string): Promise<GitHubActor> {
     const url = new URL("/user", this.apiBase);
-    const response = await fetch(url, {
-      headers: { ...githubHeaders, Authorization: `Bearer ${accessToken}` },
-    });
+    const response = await githubFetch(
+      url,
+      { headers: { ...githubHeaders, Authorization: `Bearer ${accessToken}` } },
+      "GITHUB_UNAVAILABLE",
+    );
     const value = await parseJsonResponse<Record<string, unknown>>(response, "GITHUB_UNAVAILABLE");
     if (
       typeof value.id !== "number" ||
@@ -172,9 +239,11 @@ export class GitHubClient {
       const url = new URL("/user/installations", this.apiBase);
       url.searchParams.set("per_page", "100");
       url.searchParams.set("page", String(page));
-      const response = await fetch(url, {
-        headers: { ...githubHeaders, Authorization: `Bearer ${accessToken}` },
-      });
+      const response = await githubFetch(
+        url,
+        { headers: { ...githubHeaders, Authorization: `Bearer ${accessToken}` } },
+        "GITHUB_UNAVAILABLE",
+      );
       const value = await parseJsonResponse<Record<string, unknown>>(response, "GITHUB_UNAVAILABLE");
       if (!Array.isArray(value.installations)) {
         throw new BrokerProblem(502, "GITHUB_UNAVAILABLE", "GitHub returned invalid installations");
@@ -200,7 +269,9 @@ export class GitHubClient {
 }
 
 function hasNextPage(link: string | null): boolean {
-  return link?.split(",").some((part) => /;\s*rel="next"\s*$/u.test(part.trim())) ?? false;
+  return link?.split(",").some(
+    (part) => /;\s*rel\s*=\s*"next"(?:\s*;|\s*$)/u.test(part.trim()),
+  ) ?? false;
 }
 
 function parseInstallation(raw: unknown): InstallationItem | null {
