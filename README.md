@@ -23,6 +23,7 @@ slide.
 | `@mmd2pptx/core` | Browser and Node SDK for parsing and diagnostic-aware forward exporters |
 | `mmd2pptx` | Main CLI for Mermaid-to-PPTX/SVG/draw.io/JSON Canvas conversion |
 | GitHub Pages | Hosts the static web app without receiving diagram source |
+| GitHub broker (development) | Separate read-only GitHub App authentication and installation-listing service; not a conversion API |
 
 The static app and SDK perform conversion locally. Diagram contents do not need
 to leave the user's device.
@@ -185,6 +186,12 @@ and an explicit data-retention policy.
 A future HTTP service should call the same core package rather than creating a
 second conversion implementation.
 
+The read-only GitHub App uses a different, narrowly scoped service in
+[`apps/broker`](apps/broker). Its current authentication shell runs on
+Cloudflare Workers, keeps GitHub credentials in encrypted server-side sessions,
+and lists installations without reading repository files. It is not deployed by
+GitHub Pages and does not perform diagram conversion.
+
 ## Development
 
 ```bash
@@ -197,6 +204,7 @@ The repository is a pnpm workspace:
 
 ```text
 apps/web       static browser app
+apps/broker    private Cloudflare Worker authentication broker
 packages/core  conversion engine
 packages/cli   command-line interface
 ```

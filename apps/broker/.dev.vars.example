@@ -1,0 +1,6 @@
+BROKER_PUBLIC_URL=http://localhost:8787
+ALLOWED_ORIGINS=http://localhost:5173
+GITHUB_APP_CLIENT_ID=replace-with-a-test-app-client-id
+GITHUB_APP_CLIENT_SECRET=replace-with-a-test-app-client-secret
+GITHUB_APP_SLUG=replace-with-a-test-app-slug
+SESSION_ENCRYPTION_KEY=replace-with-32-random-bytes-in-base64
