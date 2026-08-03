@@ -43,3 +43,11 @@ No draw.io, SVG, or JSON Canvas importer is included in this stage.
 Each lane ships independently testable slices, but output integration waits for
 the shared IR and stable-ID contracts rather than inventing format-specific
 models.
+
+## GitHub source integration
+
+A read-only GitHub App can add repository-backed Mermaid source selection
+without changing the forward conversion model. The proposed MVP, permission
+boundary, broker architecture, and staged acceptance criteria are documented in
+[`github-app-mvp.md`](github-app-mvp.md). Repository write-back, pull-request
+bots, Checks, and synchronization enforcement remain deferred.

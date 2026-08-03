@@ -62,6 +62,11 @@ runtime Mermaid dependency.
 - HTTP API: a separately deployed, versioned service described by
   `openapi.yaml`. GitHub Pages cannot execute this service.
 
+The proposed read-only GitHub integration is documented separately in
+[`github-app-mvp.md`](github-app-mvp.md). It adds a narrow authentication broker
+for GitHub authorization and source retrieval; Mermaid rendering and artifact
+generation remain in the browser. The broker is not the conversion HTTP API.
+
 ## Reliability contract
 
 The converter must never report success solely because a `.pptx` Blob was
