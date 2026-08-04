@@ -10,6 +10,7 @@ than a flattened image.
 | --- | --- |
 | [`logo.svg`](../apps/web/public/brand/logo.svg) | Default horizontal logo on light backgrounds |
 | [`logo-dark.svg`](../apps/web/public/brand/logo-dark.svg) | Horizontal logo on dark backgrounds |
+| [`logo-reference.png`](../apps/web/public/brand/logo-reference.png) | 2029 × 775 approved raster reference artwork |
 | [`mark.svg`](../apps/web/public/brand/mark.svg) | Icon-only mark on light backgrounds |
 | [`mark-dark.svg`](../apps/web/public/brand/mark-dark.svg) | Icon-only mark on dark backgrounds |
 | [`avatar.png`](../apps/web/public/brand/avatar.png) | 1024 × 1024 transparent PNG for GitHub and package profiles |
@@ -17,9 +18,10 @@ than a flattened image.
 | [`favicon.png`](../apps/web/public/favicon.png) | 64 × 64 raster fallback for browsers without SVG favicon support |
 
 The primary logo and mark assets are SVG so they remain sharp at any size.
-`avatar.png` and `favicon.png` are raster exports for fixed-size profile and
-browser use. Keep the aspect ratio when resizing and leave clear space around
-the mark.
+`logo-reference.png` preserves the approved raster artwork for visual
+comparison and should not replace the SVG assets in the website. `avatar.png`
+and `favicon.png` are raster exports for fixed-size profile and browser use.
+Keep the aspect ratio when resizing and leave clear space around the mark.
 
 ## Colors
 
