@@ -5,6 +5,8 @@ packages:
 onlyBuiltDependencies:
   - esbuild
   - puppeteer
+  - workerd
 allowBuilds:
   esbuild: true
   puppeteer: true
+  workerd: true

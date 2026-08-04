@@ -31,6 +31,55 @@ test("renders the synthetic default and downloads a non-empty PowerPoint ZIP", a
   await expect(page.locator("#export span")).toHaveText("Downloaded");
 });
 
+test("offers quick links to related diagram editors", async ({ page }) => {
+  await page.goto("/");
+
+  const links = [
+    { href: "https://mermaid.live/", name: "Mermaid Live" },
+    { href: "https://editsvgcode.com/", name: "SVG Code Editor" },
+    { href: "https://app.diagrams.net/", name: "diagrams.net" },
+  ];
+
+  for (const link of links) {
+    const element = page.getByRole("link", { name: new RegExp(link.name, "i") });
+    await expect(element).toHaveAttribute("href", link.href);
+    await expect(element).toHaveAttribute("target", "_blank");
+    await expect(element).toHaveAttribute("rel", "noopener noreferrer");
+  }
+});
+
+test("uses the project logo with SVG and PNG favicons", async ({ page }) => {
+  await page.goto("/");
+
+  const logo = page.locator(".brand img");
+  await expect(logo).toBeVisible();
+  await expect(logo).toHaveAttribute("alt", "mmd2pptx");
+  await expect(logo).toHaveAttribute("src", "./brand/logo.svg");
+  await expect(page.locator('link[rel="icon"][type="image/svg+xml"]')).toHaveAttribute(
+    "href",
+    "./favicon.svg",
+  );
+  await expect(page.locator('link[rel="icon"][type="image/png"]')).toHaveAttribute(
+    "href",
+    "./favicon.png",
+  );
+  await expect(page.locator('link[rel="icon"][type="image/png"]')).toHaveAttribute(
+    "sizes",
+    "64x64",
+  );
+});
+
+test("places export settings below the source and preview workspace", async ({ page }) => {
+  await page.goto("/");
+
+  const sectionClasses = await page.locator("main > section").evaluateAll((sections) =>
+    sections.map((section) => section.className)
+  );
+  expect(sectionClasses).toContain("workspace");
+  expect(sectionClasses).toContain("controls-card");
+  expect(sectionClasses.indexOf("workspace")).toBeLessThan(sectionClasses.indexOf("controls-card"));
+});
+
 test("blocks export when the Mermaid source is invalid", async ({ page }) => {
   await page.goto("/");
   await expect(page.locator("#render-state b")).toHaveText("Rendered");

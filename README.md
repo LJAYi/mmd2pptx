@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="apps/web/public/brand/logo.svg" alt="mmd2pptx" width="520" />
+</p>
+
 # mmd2pptx
 
 Export Mermaid diagrams to editable PowerPoint, normalized SVG, draw.io, and
@@ -11,7 +15,7 @@ labels, and connectors become native PowerPoint objects where possible, and the
 conversion result reports diagnostics instead of silently producing an empty
 slide.
 
-> **Status:** v0.2.3. The web app and CLI accept Mermaid source, while the core
+> **Status:** v0.2.4. The web app and CLI accept Mermaid source, while the core
 > SDK converts Mermaid-rendered SVG. The API and rendering coverage may still
 > evolve before 1.0.
 
@@ -23,9 +27,14 @@ slide.
 | `@mmd2pptx/core` | Browser and Node SDK for parsing and diagnostic-aware forward exporters |
 | `mmd2pptx` | Main CLI for Mermaid-to-PPTX/SVG/draw.io/JSON Canvas conversion |
 | GitHub Pages | Hosts the static web app without receiving diagram source |
+| GitHub broker (development) | Separate read-only GitHub App authentication and installation-listing service; not a conversion API |
 
 The static app and SDK perform conversion locally. Diagram contents do not need
 to leave the user's device.
+
+The project logo and reusable light/dark variants live in
+[`apps/web/public/brand`](apps/web/public/brand). See the
+[brand asset guide](docs/brand.md) for colors and usage.
 
 ## Web app
 
@@ -189,6 +198,12 @@ and an explicit data-retention policy.
 A future HTTP service should call the same core package rather than creating a
 second conversion implementation.
 
+The read-only GitHub App uses a different, narrowly scoped service in
+[`apps/broker`](apps/broker). Its current authentication shell runs on
+Cloudflare Workers, keeps GitHub credentials in encrypted server-side sessions,
+and lists installations without reading repository files. It is not deployed by
+GitHub Pages and does not perform diagram conversion.
+
 ## Development
 
 ```bash
@@ -201,6 +216,7 @@ The repository is a pnpm workspace:
 
 ```text
 apps/web       static browser app
+apps/broker    private Cloudflare Worker authentication broker
 packages/core  conversion engine
 packages/cli   command-line interface
 ```

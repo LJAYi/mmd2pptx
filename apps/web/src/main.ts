@@ -65,9 +65,8 @@ if (!app) throw new Error("Application root was not found.");
 app.innerHTML = `
   <div class="shell">
     <header class="topbar">
-      <a class="brand" href="./" aria-label="mmd2pptx home">
-        <span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></span>
-        <span>mmd<span>2</span>pptx</span>
+      <a class="brand" href="./">
+        <img src="./brand/logo.svg" alt="mmd2pptx" />
       </a>
       <div class="topbar-note">
         <span class="privacy-dot" aria-hidden="true"></span>
@@ -85,57 +84,6 @@ app.innerHTML = `
           <h1 id="page-title">Diagrams that stay <em>editable.</em></h1>
         </div>
         <p class="intro-copy">Turn Mermaid flowcharts into PowerPoint slides made of real shapes, connectors, and text—not a flattened screenshot.</p>
-      </section>
-
-      <section class="controls-card" aria-label="Export settings">
-        <label class="field filename-field">
-          <span>File name</span>
-          <span class="input-suffix-wrap">
-            <input id="file-name" value="mmd2pptx-diagram" autocomplete="off" spellcheck="false" />
-            <small id="file-suffix">.pptx</small>
-          </span>
-        </label>
-        <label class="field">
-          <span>Export format</span>
-          <select id="export-format">
-            <option value="pptx">PowerPoint (.pptx)</option>
-            <option value="svg">SVG (.svg)</option>
-            <option value="drawio">draw.io (.drawio)</option>
-            <option value="json-canvas">JSON Canvas (.canvas)</option>
-          </select>
-        </label>
-        <label class="field" id="pptx-mode-field">
-          <span>PPTX mode</span>
-          <select id="pptx-mode">
-            <option value="smart">Smart — editable connectors</option>
-            <option value="faithful">Faithful — visual geometry</option>
-            <option value="exact">Exact — one SVG object</option>
-          </select>
-        </label>
-        <label class="field" id="pptx-layout-field">
-          <span>Mermaid theme</span>
-          <select id="theme">
-            <option value="base">Base</option>
-            <option value="neutral">Neutral</option>
-            <option value="default">Default</option>
-            <option value="forest">Forest</option>
-            <option value="dark">Dark</option>
-          </select>
-        </label>
-        <label class="field color-field">
-          <span>Slide background</span>
-          <span class="color-control">
-            <input id="background" type="color" value="#ffffff" />
-            <output id="background-value" for="background">#FFFFFF</output>
-          </span>
-        </label>
-        <label class="field">
-          <span>Slide format</span>
-          <select id="layout">
-            <option value="wide">Widescreen 16:9</option>
-            <option value="standard">Standard 4:3</option>
-          </select>
-        </label>
       </section>
 
       <section class="workspace" aria-label="Mermaid conversion workspace">
@@ -264,6 +212,57 @@ app.innerHTML = `
         </article>
       </section>
 
+      <section class="controls-card" aria-label="Export settings">
+        <label class="field filename-field">
+          <span>File name</span>
+          <span class="input-suffix-wrap">
+            <input id="file-name" value="mmd2pptx-diagram" autocomplete="off" spellcheck="false" />
+            <small id="file-suffix">.pptx</small>
+          </span>
+        </label>
+        <label class="field">
+          <span>Export format</span>
+          <select id="export-format">
+            <option value="pptx">PowerPoint (.pptx)</option>
+            <option value="svg">SVG (.svg)</option>
+            <option value="drawio">draw.io (.drawio)</option>
+            <option value="json-canvas">JSON Canvas (.canvas)</option>
+          </select>
+        </label>
+        <label class="field" id="pptx-mode-field">
+          <span>PPTX mode</span>
+          <select id="pptx-mode">
+            <option value="smart">Smart — editable connectors</option>
+            <option value="faithful">Faithful — visual geometry</option>
+            <option value="exact">Exact — one SVG object</option>
+          </select>
+        </label>
+        <label class="field" id="pptx-layout-field">
+          <span>Mermaid theme</span>
+          <select id="theme">
+            <option value="base">Base</option>
+            <option value="neutral">Neutral</option>
+            <option value="default">Default</option>
+            <option value="forest">Forest</option>
+            <option value="dark">Dark</option>
+          </select>
+        </label>
+        <label class="field color-field">
+          <span>Slide background</span>
+          <span class="color-control">
+            <input id="background" type="color" value="#ffffff" />
+            <output id="background-value" for="background">#FFFFFF</output>
+          </span>
+        </label>
+        <label class="field">
+          <span>Slide format</span>
+          <select id="layout">
+            <option value="wide">Widescreen 16:9</option>
+            <option value="standard">Standard 4:3</option>
+          </select>
+        </label>
+      </section>
+
       <section class="export-row">
         <div class="diagnostics-card" aria-live="polite">
           <div class="diagnostics-head">
@@ -291,6 +290,36 @@ app.innerHTML = `
           </button>
           <small>No upload. No account. No diagram data retained.</small>
         </div>
+      </section>
+
+      <section class="quick-links" aria-labelledby="quick-links-title">
+        <div class="quick-links-copy">
+          <p class="eyebrow">QUICK LINKS</p>
+          <h2 id="quick-links-title">Continue in another diagram tool.</h2>
+        </div>
+        <nav class="quick-link-list" aria-label="External diagram tools">
+          <a href="https://mermaid.live/" target="_blank" rel="noopener noreferrer">
+            <span>
+              <strong>Mermaid Live</strong>
+              <small>Edit and validate Mermaid source</small>
+            </span>
+            <i aria-hidden="true">↗</i>
+          </a>
+          <a href="https://editsvgcode.com/" target="_blank" rel="noopener noreferrer">
+            <span>
+              <strong>SVG Code Editor</strong>
+              <small>Inspect and refine exported SVG</small>
+            </span>
+            <i aria-hidden="true">↗</i>
+          </a>
+          <a href="https://app.diagrams.net/" target="_blank" rel="noopener noreferrer">
+            <span>
+              <strong>diagrams.net</strong>
+              <small>Open and edit draw.io files</small>
+            </span>
+            <i aria-hidden="true">↗</i>
+          </a>
+        </nav>
       </section>
     </main>
 
