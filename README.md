@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="apps/web/public/brand/logo.svg" alt="mmd2pptx" width="520" />
+</p>
+
 # mmd2pptx
 
 Export Mermaid diagrams to editable PowerPoint, normalized SVG, draw.io, and
@@ -27,6 +31,10 @@ slide.
 
 The static app and SDK perform conversion locally. Diagram contents do not need
 to leave the user's device.
+
+The project logo and reusable light/dark variants live in
+[`apps/web/public/brand`](apps/web/public/brand). See the
+[brand asset guide](docs/brand.md) for colors and usage.
 
 ## Web app
 

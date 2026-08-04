@@ -48,22 +48,12 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 }
 
 .brand {
-  color: var(--ink);
   display: inline-flex;
   width: max-content;
   align-items: center;
-  gap: 11px;
-  font-size: 18px;
-  font-weight: 700;
-  letter-spacing: -0.04em;
   text-decoration: none;
 }
-.brand > span:last-child span { color: var(--accent); }
-.brand-mark { display: flex; align-items: flex-end; gap: 2px; width: 24px; height: 22px; }
-.brand-mark i { display: block; width: 6px; border: 2px solid var(--ink); border-radius: 1px; }
-.brand-mark i:nth-child(1) { height: 12px; }
-.brand-mark i:nth-child(2) { height: 20px; background: var(--accent); border-color: var(--accent); }
-.brand-mark i:nth-child(3) { height: 16px; }
+.brand img { display: block; width: 136px; height: auto; }
 
 .topbar-note {
   color: var(--muted);

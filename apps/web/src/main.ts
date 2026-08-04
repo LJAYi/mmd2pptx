@@ -63,9 +63,8 @@ if (!app) throw new Error("Application root was not found.");
 app.innerHTML = `
   <div class="shell">
     <header class="topbar">
-      <a class="brand" href="./" aria-label="mmd2pptx home">
-        <span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></span>
-        <span>mmd<span>2</span>pptx</span>
+      <a class="brand" href="./">
+        <img src="./brand/logo.svg" alt="mmd2pptx" />
       </a>
       <div class="topbar-note">
         <span class="privacy-dot" aria-hidden="true"></span>

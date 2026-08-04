@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1040 240" role="img">
+  <title>mmd2pptx</title>
+  <desc>mmd2pptx logo for dark backgrounds: a flowchart enters a presentation page containing editable shapes.</desc>
+  <g fill="none" stroke-linecap="round" stroke-linejoin="round">
+    <rect x="24" y="32" width="52" height="52" rx="8" fill="#6366F1" stroke="none"/>
+    <circle cx="50" cy="192" r="26" fill="#6366F1" stroke="none"/>
+    <path d="M50 84v31c0 11 9 20 20 20h90M50 166v-11c0-11 9-20 20-20h90" stroke="#6366F1" stroke-width="10"/>
+    <path d="m145 119 17 16-17 16" stroke="#6366F1" stroke-width="10"/>
+
+    <path d="M154 102V28h96l42 42v142H154v-48" stroke="#FB6A32" stroke-width="10"/>
+    <path d="M250 28v42h42" fill="#FB6A32" stroke="#FB6A32" stroke-width="10"/>
+
+    <rect x="168" y="94" width="48" height="48" rx="3" fill="#FB6A32" fill-opacity=".5" stroke="none" transform="rotate(-12 192 118)"/>
+    <path d="M221 89a24 24 0 1 1 0 48 24 24 0 0 1 0-48Z" stroke="#FB6A32" stroke-width="8"/>
+    <path d="m191 145 44 5-28 40Z" fill="#FB6A32" stroke="none" transform="rotate(8 213 167)"/>
+  </g>
+  <text x="334" y="166" fill="#F8FAFC" font-family="Arial Rounded MT Bold, Manrope, Arial, sans-serif" font-size="108" font-weight="700" letter-spacing="-6">mmd2pptx</text>
+</svg>
