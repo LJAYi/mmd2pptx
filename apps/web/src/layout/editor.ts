@@ -122,6 +122,7 @@ export class SvgLayoutEditor {
   private readonly onStateChange: ((state: LayoutEditorState) => void) | undefined;
   private readonly storage: Storage | undefined;
   private readonly viewport: HTMLElement;
+  private collisionCount = 0;
   private diagram: DiagramIR = emptyDiagram();
   private drag: DragState | undefined;
   private edgeHandles: EdgeHandle[] = [];
@@ -163,6 +164,7 @@ export class SvgLayoutEditor {
     this.edgeHandles = [];
     this.groupHandles.clear();
     this.nodeHandles.clear();
+    this.collisionCount = 0;
     this.overlay?.remove();
     this.overlay = undefined;
     this.selectedKey = undefined;
@@ -969,6 +971,7 @@ export class SvgLayoutEditor {
     entries: Map<string, { bounds: LayoutBounds; mode: string }>,
   ): void {
     const collisions = collisionKeys(entries);
+    this.collisionCount = collisions.size;
     for (const [key, handle] of this.nodeHandles) {
       handle.element.classList.toggle("layout-node-collision", collisions.has(key));
     }
@@ -986,11 +989,7 @@ export class SvgLayoutEditor {
       canUngroup: Boolean(this.selectedGroupId?.startsWith("layout-group-")),
       canRedo: this.history.canRedo,
       canUndo: this.history.canUndo,
-      collisionCount: collisionKeys(
-        new Map(
-          this.sidecar.nodes.map((entry) => [layoutIdentityKey(entry.identity), entry]),
-        ),
-      ).size,
+      collisionCount: this.collisionCount,
       editing: this.editing,
       hasDiagram: Boolean(this.svg),
       hasOverrides:

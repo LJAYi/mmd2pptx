@@ -306,7 +306,16 @@ describe("svgStringToPptxBuffer", () => {
     expect(slideXml).toContain("<asvg:svgBlip");
     const svgMedia = Object.keys(zip.files).filter((name) => name.endsWith(".svg"));
     expect(svgMedia).toHaveLength(1);
-    expect(await zip.file(svgMedia[0]!)?.async("string")).toContain("flowchart-A-0");
+    const embeddedSvg = await zip.file(svgMedia[0]!)?.async("string") ?? "";
+    expect(embeddedSvg).toContain("flowchart-A-0");
+    expect(embeddedSvg).not.toContain("foreignObject");
+    expect(embeddedSvg).toContain("<text");
+    expect(embeddedSvg).toContain("Start");
+    expect(embeddedSvg).not.toContain("dominant-baseline");
+    expect(embeddedSvg).not.toContain(" dy=");
+    expect(result.diagnostics).toContainEqual(expect.objectContaining({
+      code: "PPTX_EXACT_FOREIGN_OBJECT_NORMALIZED",
+    }));
   });
 
   it("removes active content and external references from exact SVG media", async () => {

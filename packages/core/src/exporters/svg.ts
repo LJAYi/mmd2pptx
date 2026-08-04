@@ -232,19 +232,23 @@ function textSvg(text: ExportText, id: string): string[] {
   assertBounds(text.bounds, `text ${id}`);
   const x = number(text.bounds.x + text.bounds.width / 2);
   const lines = text.text.split(/\r?\n/);
-  const lineHeight = (text.fontSize ?? 14) * 1.2;
-  const startY = text.bounds.y + text.bounds.height / 2
-    - ((lines.length - 1) * lineHeight) / 2;
+  const fontSize = text.fontSize ?? 14;
+  const lineHeight = fontSize * 1.2;
+  // Use explicit alphabetic baselines because PowerPoint and Illustrator do
+  // not reliably honor dominant-baseline. The 0.35em shift optically centers
+  // the em box around the requested text bounds.
+  const firstBaseline = text.bounds.y + text.bounds.height / 2
+    - ((lines.length - 1) * lineHeight) / 2
+    + fontSize * 0.35;
   const style = [
     `fill:${xml(styleColor(text.color, "#222222"))}`,
     `font-family:${xml(styleFontFamily(text.fontFamily))}`,
-    `font-size:${number(text.fontSize ?? 14)}px`,
+    `font-size:${number(fontSize)}px`,
     "text-anchor:middle",
-    "dominant-baseline:middle",
   ].join(";");
   return [
-    `<text id="${id}" x="${x}" y="${number(startY)}" style="${style}">`,
-    ...lines.map((line, index) => `  <tspan x="${x}" dy="${index === 0 ? "0" : number(lineHeight)}">${xml(line)}</tspan>`),
+    `<text id="${id}" x="${x}" y="${number(firstBaseline)}" style="${style}">`,
+    ...lines.map((line, index) => `  <tspan x="${x}" y="${number(firstBaseline + index * lineHeight)}">${xml(line)}</tspan>`),
     "</text>",
   ];
 }

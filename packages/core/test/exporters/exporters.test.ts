@@ -119,6 +119,21 @@ describe("exportDiagramToSvg", () => {
     expect(output).toContain('data-source-id="edge A→B" opacity="0.75"');
     expect(output).toContain("stroke-dasharray:3 2");
   });
+
+  it("uses explicit centered baselines for multi-line SVG text", () => {
+    const output = exportDiagramToSvg({
+      ...DIAGRAM,
+      nodes: [{
+        ...DIAGRAM.nodes[0]!,
+        text: { ...DIAGRAM.nodes[0]!.text!, text: "Top\nBottom" },
+      }, DIAGRAM.nodes[1]!],
+    });
+
+    expect(output).not.toContain("dominant-baseline");
+    expect(output).not.toContain(" dy=");
+    expect(output).toContain('<tspan x="75" y="76.5">Top</tspan>');
+    expect(output).toContain('<tspan x="75" y="93.3">Bottom</tspan>');
+  });
 });
 
 describe("exportDiagramToDrawio", () => {

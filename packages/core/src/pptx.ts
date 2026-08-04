@@ -492,10 +492,23 @@ export async function svgStringToPptxBuffer(
     };
   }
   if (options.mode === "exact") {
-    const generated = await exactSvgToPptxBuffer(svg, parsed.data, options);
+    const normalizedForeignObjects = /<foreignObject(?:\s|>)/i.test(svg);
+    const generated = await exactSvgToPptxBuffer(
+      normalizedForeignObjects ? exportDiagramToSvg(parsed.data) : svg,
+      parsed.data,
+      options,
+    );
     return {
       data: generated.data,
-      diagnostics: [...parsed.diagnostics, ...generated.diagnostics],
+      diagnostics: [
+        ...parsed.diagnostics,
+        ...(normalizedForeignObjects ? [{
+          code: "PPTX_EXACT_FOREIGN_OBJECT_NORMALIZED",
+          message: "Converted Mermaid HTML labels to portable SVG text so PowerPoint displays them.",
+          severity: "info" as const,
+        }] : []),
+        ...generated.diagnostics,
+      ],
       summary: generated.summary,
     };
   }
