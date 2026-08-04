@@ -4,6 +4,7 @@ coverage/
 playwright-report/
 test-results/
 .DS_Store
+.dev.vars
 *.pptx
 apps/web/public/vendor/
 work/
