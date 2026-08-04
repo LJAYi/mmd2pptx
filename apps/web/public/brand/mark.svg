@@ -1,18 +1,25 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 550 390" role="img">
   <title>mmd2pptx mark</title>
   <desc>A flowchart enters a presentation page containing a square, circle, and triangle.</desc>
+  <defs>
+    <mask id="square-circle-cutout" maskUnits="userSpaceOnUse" x="240" y="70" width="240" height="180" style="mask-type:luminance">
+      <rect x="240" y="70" width="240" height="180" fill="#fff"/>
+      <circle cx="408" cy="174" r="42" fill="#000"/>
+    </mask>
+  </defs>
+
+  <g fill="none" stroke="#2A1EF1" stroke-width="19" stroke-linecap="butt">
+    <path d="M79 105V179A30 30 0 0 0 109 209H215"/>
+    <path d="M79 292V271A30 30 0 0 1 109 241H215"/>
+  </g>
+  <path d="M205 177.66A4 4 0 0 1 211.59 174.61L258.46 214.48A4 4 0 0 1 258.49 220.55L211.62 261.25A4 4 0 0 1 205 258.23Z" fill="#2A1EF1"/>
   <rect x="32" y="23" width="94" height="94" rx="13" fill="#2A1EF1"/>
   <circle cx="79" cy="323" r="45" fill="#2A1EF1"/>
-  <g fill="none" stroke="#2A1EF1" stroke-width="19" stroke-linecap="butt">
-    <path d="M79 117V179A30 30 0 0 0 109 209H205"/>
-    <path d="M79 278V271A30 30 0 0 1 109 241H205"/>
-  </g>
-  <path d="m207.5 183 42.5 34.5-42.5 36.5" fill="none" stroke="#2A1EF1" stroke-width="19" stroke-linecap="round" stroke-linejoin="round"/>
 
   <path d="M215.5 151V55A21 21 0 0 1 236.5 34H448l66.5 66.5v234A21 21 0 0 1 493.5 355.5h-257a21 21 0 0 1-21-21v-47" fill="none" stroke="#F55A13" stroke-width="19" stroke-linecap="butt" stroke-linejoin="round"/>
   <path d="M441.5 34v58.5a11 11 0 0 0 11 11h62" fill="none" stroke="#F55A13" stroke-width="19" stroke-linecap="butt" stroke-linejoin="round"/>
 
-  <rect x="263" y="97.5" width="89" height="89" rx="6" fill="#F55A13" fill-opacity=".5" transform="rotate(-14 307.5 142)"/>
+  <rect x="263" y="97.5" width="89" height="89" rx="6" fill="#F55A13" fill-opacity=".5" transform="rotate(-14 307.5 142)" mask="url(#square-circle-cutout)"/>
   <circle cx="408" cy="174" r="46.5" fill="none" stroke="#F55A13" stroke-width="9"/>
   <path d="M321.93 228.97A6 6 0 0 1 328.55 220.86L410.19 235.27A6 6 0 0 1 413.89 244.86L363.46 309.69A6 6 0 0 1 353.14 308.21Z" fill="#F55A13"/>
 </svg>
