@@ -1,18 +1,16 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1040 240" role="img">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 2029 775" role="img">
   <title>mmd2pptx</title>
   <desc>mmd2pptx logo for dark backgrounds: a flowchart enters a presentation page containing editable shapes.</desc>
-  <g fill="none" stroke-linecap="round" stroke-linejoin="round">
-    <rect x="24" y="32" width="52" height="52" rx="8" fill="#6366F1" stroke="none"/>
-    <circle cx="50" cy="192" r="26" fill="#6366F1" stroke="none"/>
-    <path d="M50 84v31c0 11 9 20 20 20h90M50 166v-11c0-11 9-20 20-20h90" stroke="#6366F1" stroke-width="10"/>
-    <path d="m145 119 17 16-17 16" stroke="#6366F1" stroke-width="10"/>
-
-    <path d="M154 102V28h96l42 42v142H154v-48" stroke="#FB6A32" stroke-width="10"/>
-    <path d="M250 28v42h42" fill="#FB6A32" stroke="#FB6A32" stroke-width="10"/>
-
-    <rect x="168" y="94" width="48" height="48" rx="3" fill="#FB6A32" fill-opacity=".5" stroke="none" transform="rotate(-12 192 118)"/>
-    <path d="M221 89a24 24 0 1 1 0 48 24 24 0 0 1 0-48Z" stroke="#FB6A32" stroke-width="8"/>
-    <path d="m191 145 44 5-28 40Z" fill="#FB6A32" stroke="none" transform="rotate(8 213 167)"/>
+  <g stroke-linecap="round" stroke-linejoin="round">
+    <rect x="112" y="203" width="95" height="94" rx="13" fill="#635BFF"/>
+    <circle cx="160" cy="497" r="49" fill="#635BFF"/>
+    <path d="M160 297v52c0 28 22 50 50 50h116M160 446v-23c0-13 11-24 24-24h142" fill="none" stroke="#635BFF" stroke-width="20"/>
+    <path d="m286 360 42 39-42 40" fill="none" stroke="#635BFF" stroke-width="20"/>
+    <path d="M296 333v-86c0-19 15-34 34-34h198l67 67v222c0 19-15 34-34 34H330c-19 0-34-15-34-34v-35" fill="none" stroke="#FF6A2A" stroke-width="20"/>
+    <path d="M528 213v67h67Z" fill="#FF6A2A"/>
+    <rect x="341" y="273" width="88" height="88" rx="4" fill="#FF6A2A" fill-opacity=".5" transform="rotate(-14 385 317)"/>
+    <circle cx="486" cy="351" r="49" fill="none" stroke="#FF6A2A" stroke-width="10"/>
+    <path d="m398 398 101 16-61 79Z" fill="#FF6A2A"/>
   </g>
-  <text x="334" y="166" fill="#F8FAFC" font-family="Arial Rounded MT Bold, Manrope, Arial, sans-serif" font-size="108" font-weight="700" letter-spacing="-6">mmd2pptx</text>
+  <text x="682" y="470" fill="#F8FAFC" font-family="Arial Rounded MT Bold, Manrope, Arial, sans-serif" font-size="260" font-weight="700" letter-spacing="-3">mmd2pptx</text>
 </svg>

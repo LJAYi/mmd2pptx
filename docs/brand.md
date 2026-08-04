@@ -22,9 +22,9 @@ resizing and leave clear space around the mark.
 
 | Role | Light asset | Dark asset |
 | --- | --- | --- |
-| Diagram flow | `#4338CA` | `#6366F1` |
-| Presentation page | `#F15A24` | `#FB6A32` |
-| Wordmark | `#111C36` | `#F8FAFC` |
+| Diagram flow | `#2A1EF1` | `#635BFF` |
+| Presentation page | `#F55A13` | `#FF6A2A` |
+| Wordmark | `#121E38` | `#F8FAFC` |
 
 The rotated square uses the presentation color with `fill-opacity=".5"`. Do
 not replace the square's transparency with a separate opaque tint: its overlap
