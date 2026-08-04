@@ -49,6 +49,23 @@ FlowDB supplies stable node/edge identity, endpoint ownership, parallel-edge
 order, and nested subgraphs; SVG geometry and computed appearance remain
 authoritative. Missing or ambiguous matches are returned as diagnostics.
 
+Layout edits use a versioned sidecar keyed by semantic/source identity and are
+applied to the same Diagram IR before any forward exporter runs:
+
+```ts
+const sidecar = parseLayoutSidecar(savedLayoutJson);
+const laidOut = applyLayoutSidecar(parsed.data, sidecar);
+const result = await drawioExporter.export(laidOut.data);
+```
+
+`reconcileLayout` carries stable overrides across a fresh Mermaid render,
+places new colliding nodes, and drops stale edge routes with explicit change
+metadata. Sidecars never replace Mermaid as the semantic source.
+
+Optional sidecar fields preserve cubic/quadratic control geometry, connection
+ports, edge labels, z-order, and layout-only groups while remaining compatible
+with earlier v1 sidecars.
+
 For automatic layout adjustments, `routeOrthogonal` provides deterministic,
 target-neutral obstacle routing from node bounds and optional four-side ports.
 It returns compressed M/L geometry plus diagnostics, and uses a bounded search

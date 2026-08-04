@@ -63,12 +63,19 @@ export class SvgPanZoomViewer {
 
   setSvg(svg: SVGSVGElement): void {
     this.svg = svg;
-    const dimensions = measureSvg(svg);
-    this.diagramWidth = dimensions.width;
-    this.diagramHeight = dimensions.height;
+    this.refreshDimensions();
     this.root.classList.add("has-diagram");
     this.setControlsEnabled(true);
     this.fit();
+  }
+
+  refreshDimensions(): void {
+    if (!this.svg) return;
+    const svg = this.svg;
+    const dimensions = measureSvg(svg);
+    this.diagramWidth = dimensions.width;
+    this.diagramHeight = dimensions.height;
+    this.setView({ ...this.state });
   }
 
   clear(): void {
@@ -207,6 +214,8 @@ export class SvgPanZoomViewer {
 
     this.viewport.addEventListener("keydown", (event) => {
       if (!this.svg) return;
+      if (this.viewport.classList.contains("is-layout-editing")
+        && event.key.startsWith("Arrow")) return;
       const panStep = event.shiftKey ? 100 : 40;
       switch (event.key) {
         case "+":
