@@ -1,12 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 550 390" role="img">
   <title>mmd2pptx</title>
-  <defs>
-    <mask id="square-circle-cutout" maskUnits="userSpaceOnUse" x="240" y="70" width="240" height="180" style="mask-type:luminance">
-      <rect x="240" y="70" width="240" height="180" fill="#fff"/>
-      <circle cx="408" cy="174" r="42" fill="#000"/>
-    </mask>
-  </defs>
-
   <g fill="none" stroke="#2A1EF1" stroke-width="19" stroke-linecap="butt">
     <path d="M79 105V179A30 30 0 0 0 109 209H215"/>
     <path d="M79 292V271A30 30 0 0 1 109 241H215"/>
@@ -18,7 +11,7 @@
   <path d="M215.5 151V55A21 21 0 0 1 236.5 34H448l66.5 66.5v234A21 21 0 0 1 493.5 355.5h-257a21 21 0 0 1-21-21v-47" fill="none" stroke="#F55A13" stroke-width="19" stroke-linecap="butt" stroke-linejoin="round"/>
   <path d="M441.5 34v58.5a11 11 0 0 0 11 11h62" fill="none" stroke="#F55A13" stroke-width="19" stroke-linecap="butt" stroke-linejoin="round"/>
 
-  <rect x="262.5" y="95.5" width="93" height="93" rx="7" fill="#F55A13" fill-opacity=".5" transform="rotate(-15 309 142)" mask="url(#square-circle-cutout)"/>
+  <path d="M269.5 95.5H348.5A7 7 0 0 1 355.5 102.5V160.2A56 56 0 0 0 341.23 188.5H269.5A7 7 0 0 1 262.5 181.5V102.5A7 7 0 0 1 269.5 95.5Z" fill="#F55A13" fill-opacity=".5" transform="rotate(-15 309 142)"/>
   <circle cx="408" cy="174" r="46.5" fill="none" stroke="#F55A13" stroke-width="9"/>
   <path d="M321.93 228.97A6 6 0 0 1 328.55 220.86L410.19 235.27A6 6 0 0 1 413.89 244.86L363.46 309.69A6 6 0 0 1 353.14 308.21Z" fill="#F55A13"/>
 </svg>
