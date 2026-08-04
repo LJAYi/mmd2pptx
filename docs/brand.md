@@ -14,9 +14,12 @@ than a flattened image.
 | [`mark-dark.svg`](../apps/web/public/brand/mark-dark.svg) | Icon-only mark on dark backgrounds |
 | [`avatar.png`](../apps/web/public/brand/avatar.png) | 1024 × 1024 transparent PNG for GitHub and package profiles |
 | [`favicon.svg`](../apps/web/public/favicon.svg) | Browser favicon |
+| [`favicon.png`](../apps/web/public/favicon.png) | 64 × 64 raster fallback for browsers without SVG favicon support |
 
-All assets are SVG so they remain sharp at any size. Keep the aspect ratio when
-resizing and leave clear space around the mark.
+The primary logo and mark assets are SVG so they remain sharp at any size.
+`avatar.png` and `favicon.png` are raster exports for fixed-size profile and
+browser use. Keep the aspect ratio when resizing and leave clear space around
+the mark.
 
 ## Colors
 

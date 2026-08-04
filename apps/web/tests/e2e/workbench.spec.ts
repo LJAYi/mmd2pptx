@@ -48,14 +48,21 @@ test("offers quick links to related diagram editors", async ({ page }) => {
   }
 });
 
-test("uses the project logo and SVG favicon", async ({ page }) => {
+test("uses the project logo with SVG and PNG favicons", async ({ page }) => {
   await page.goto("/");
 
   const logo = page.locator(".brand img");
   await expect(logo).toBeVisible();
   await expect(logo).toHaveAttribute("alt", "mmd2pptx");
   await expect(logo).toHaveAttribute("src", "./brand/logo.svg");
-  await expect(page.locator('link[rel="icon"]')).toHaveAttribute("href", "./favicon.svg");
+  await expect(page.locator('link[rel="icon"][type="image/svg+xml"]')).toHaveAttribute(
+    "href",
+    "./favicon.svg",
+  );
+  await expect(page.locator('link[rel="icon"][type="image/png"]')).toHaveAttribute(
+    "href",
+    "./favicon.png",
+  );
 });
 
 test("places export settings below the source and preview workspace", async ({ page }) => {
