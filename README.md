@@ -1,5 +1,9 @@
 <p align="center">
-  <img src="apps/web/public/brand/logo.svg" alt="mmd2pptx" width="520" />
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="apps/web/public/brand/logo-dark.svg">
+    <source media="(prefers-color-scheme: light)" srcset="apps/web/public/brand/logo.svg">
+    <img src="apps/web/public/brand/logo.svg" alt="mmd2pptx" width="520">
+  </picture>
 </p>
 
 # mmd2pptx
