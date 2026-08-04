@@ -63,6 +63,10 @@ test("uses the project logo with SVG and PNG favicons", async ({ page }) => {
     "href",
     "./favicon.png",
   );
+  await expect(page.locator('link[rel="icon"][type="image/png"]')).toHaveAttribute(
+    "sizes",
+    "64x64",
+  );
 });
 
 test("places export settings below the source and preview workspace", async ({ page }) => {
