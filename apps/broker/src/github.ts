@@ -150,7 +150,10 @@ async function parseJsonResponse<T>(
   if (!response.ok) {
     if (
       response.status === 429 ||
-      (response.status === 403 && response.headers.get("X-RateLimit-Remaining") === "0")
+      (response.status === 403 && (
+        response.headers.get("X-RateLimit-Remaining") === "0" ||
+        response.headers.has("Retry-After")
+      ))
     ) {
       throw new BrokerProblem(429, "GITHUB_RATE_LIMITED", "GitHub rate limit exceeded");
     }
@@ -640,15 +643,20 @@ function parseRepository(raw: unknown, installationId: number): RepositoryItem |
     typeof value.name !== "string" ||
     value.name.length === 0 ||
     value.name.includes("/") ||
+    value.name === "." ||
+    value.name === ".." ||
     typeof value.full_name !== "string" ||
     typeof owner.login !== "string" ||
     owner.login.length === 0 ||
     owner.login.includes("/") ||
+    owner.login === "." ||
+    owner.login === ".." ||
     value.full_name !== `${owner.login}/${value.name}` ||
     typeof owner.avatar_url !== "string" ||
     typeof value.private !== "boolean" ||
     typeof value.default_branch !== "string" ||
-    value.default_branch.length === 0
+    value.default_branch.length === 0 ||
+    value.default_branch.split("/").some((segment) => segment === "." || segment === "..")
   ) {
     return null;
   }

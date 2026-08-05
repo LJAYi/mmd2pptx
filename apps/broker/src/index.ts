@@ -693,7 +693,7 @@ async function route(request: Request, env: BrokerEnv): Promise<Response> {
       const page = await internalJson<DirectoryPage>(response, "BROKER_UNAVAILABLE");
       return jsonResponse(page, origin);
     }
-    let contents;
+    let contents: Awaited<ReturnType<GitHubClient["getContents"]>>;
     try {
       contents = await github.getContents(authorized.token, repository, path);
     } catch (error) {

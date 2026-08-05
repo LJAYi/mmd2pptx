@@ -177,7 +177,7 @@ describe("repository and source browsing", () => {
 
   it("walks trees without following links and returns an exact UTF-8 Markdown blob", async () => {
     const handle = await authenticatedHandle();
-    const source = "# Architecture\n\n```mermaid\nflowchart LR\n  A --> B\n```\n";
+    const source = "# Architecture 🧩\n\nCafé\n\n```mermaid\nflowchart LR\n  A --> B\n```\n";
     const bytes = new TextEncoder().encode(source);
     mockRepositories();
     mockCommit();
@@ -264,6 +264,14 @@ describe("repository and source browsing", () => {
     expect(firstPage.items).toHaveLength(50);
 
     mockRepositories();
+    const conflicting = await broker.fetch(
+      `https://broker.test/api/github/installations/${installationId}/repositories/${repositoryId}/contents?path=other&cursor=${firstPage.next_cursor}`,
+      { headers: { Authorization: `Bearer ${handle}`, Origin: origin } },
+    );
+    expect(conflicting.status).toBe(400);
+    expect(await conflicting.json()).toMatchObject({ code: "INVALID_CURSOR" });
+
+    mockRepositories();
     const second = await broker.fetch(
       `https://broker.test/api/github/installations/${installationId}/repositories/${repositoryId}/contents?cursor=${firstPage.next_cursor}`,
       { headers: { Authorization: `Bearer ${handle}`, Origin: origin } },
@@ -284,6 +292,25 @@ describe("repository and source browsing", () => {
     const response = await request(handle, "../private.mmd");
     expect(response.status).toBe(400);
     expect(await response.json()).toMatchObject({ code: "INVALID_PATH" });
+  });
+
+  it("classifies GitHub secondary throttling as rate limited before permission errors", async () => {
+    const handle = await authenticatedHandle();
+    outbound.json(
+      "GET",
+      `https://api.github.test/user/installations/${installationId}/repositories?per_page=100&page=1`,
+      403,
+      { message: "secondary rate limit" },
+      undefined,
+      { "Retry-After": "60" },
+    );
+
+    const response = await broker.fetch(
+      `https://broker.test/api/github/installations/${installationId}/repositories`,
+      { headers: { Authorization: `Bearer ${handle}`, Origin: origin } },
+    );
+    expect(response.status).toBe(429);
+    expect(await response.json()).toMatchObject({ code: "GITHUB_RATE_LIMITED" });
   });
 
   it("does not fetch oversized source blobs", async () => {
