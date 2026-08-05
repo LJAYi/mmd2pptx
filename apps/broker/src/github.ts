@@ -33,6 +33,7 @@ const githubHeaders = {
 };
 const maxGitHubJsonBytes = 2 * 1024 * 1024;
 const githubRequestTimeoutMs = 10_000;
+const maxGitHubRequestsPerClient = 90;
 const maxCollectionItems = 5_000;
 export const maxSourceBytes = 256 * 1024;
 const supportedExtensions = [".mmd", ".mermaid", ".md"];
@@ -155,7 +156,32 @@ async function parseJsonResponse<T>(
         response.headers.has("Retry-After")
       ))
     ) {
-      throw new BrokerProblem(429, "GITHUB_RATE_LIMITED", "GitHub rate limit exceeded");
+      const retryHeader = response.headers.get("Retry-After");
+      const resetHeader = response.headers.get("X-RateLimit-Reset");
+      const parsedRetry = retryHeader && /^\d+$/u.test(retryHeader) ? Number(retryHeader) : NaN;
+      const retryAfterSeconds = Number.isSafeInteger(parsedRetry) && parsedRetry >= 0
+        ? parsedRetry
+        : undefined;
+      const parsedReset = resetHeader && /^\d+$/u.test(resetHeader) ? Number(resetHeader) : NaN;
+      const resetMilliseconds = Number.isSafeInteger(parsedReset) && parsedReset >= 0
+        ? parsedReset * 1000
+        : retryAfterSeconds !== undefined
+          ? Date.now() + retryAfterSeconds * 1000
+          : undefined;
+      const resetAt = resetMilliseconds !== undefined &&
+        Number.isSafeInteger(resetMilliseconds) &&
+        resetMilliseconds <= 8_640_000_000_000_000
+        ? new Date(resetMilliseconds).toISOString()
+        : undefined;
+      throw new BrokerProblem(
+        429,
+        "GITHUB_RATE_LIMITED",
+        "GitHub rate limit exceeded",
+        {
+          ...(retryAfterSeconds !== undefined ? { retryAfterSeconds } : {}),
+          ...(resetAt ? { resetAt } : {}),
+        },
+      );
     }
     if (response.status === 404 && options.notFoundCode) {
       throw new BrokerProblem(404, options.notFoundCode, "The requested GitHub resource was not found");
@@ -185,6 +211,7 @@ export class GitHubClient {
   private readonly apiBase: URL;
   private readonly oauthBase: URL;
   private readonly redirectUri: string;
+  private remainingRequests = maxGitHubRequestsPerClient;
 
   constructor(private readonly config: GitHubClientConfig) {
     this.apiBase = fixedBaseUrl(config.apiBaseUrl, "GITHUB_API_BASE_URL");
@@ -226,7 +253,7 @@ export class GitHubClient {
 
   private async exchangeToken(payload: Record<string, string>): Promise<GitHubTokenSet> {
     const url = new URL("/login/oauth/access_token", this.oauthBase);
-    const response = await githubFetch(
+    const response = await this.fetchGitHub(
       url,
       {
         method: "POST",
@@ -254,7 +281,7 @@ export class GitHubClient {
 
   async getActor(accessToken: string): Promise<GitHubActor> {
     const url = new URL("/user", this.apiBase);
-    const response = await githubFetch(
+    const response = await this.fetchGitHub(
       url,
       { headers: { ...githubHeaders, Authorization: `Bearer ${accessToken}` } },
       "GITHUB_UNAVAILABLE",
@@ -276,7 +303,7 @@ export class GitHubClient {
       const url = new URL("/user/installations", this.apiBase);
       url.searchParams.set("per_page", "100");
       url.searchParams.set("page", String(page));
-      const response = await githubFetch(
+      const response = await this.fetchGitHub(
         url,
         { headers: { ...githubHeaders, Authorization: `Bearer ${accessToken}` } },
         "GITHUB_UNAVAILABLE",
@@ -313,7 +340,7 @@ export class GitHubClient {
       const url = new URL(`/user/installations/${installationId}/repositories`, this.apiBase);
       url.searchParams.set("per_page", "100");
       url.searchParams.set("page", String(page));
-      const response = await githubFetch(
+      const response = await this.fetchGitHub(
         url,
         { headers: { ...githubHeaders, Authorization: `Bearer ${accessToken}` } },
         "GITHUB_UNAVAILABLE",
@@ -322,8 +349,8 @@ export class GitHubClient {
         response,
         "GITHUB_UNAVAILABLE",
         {
-          notFoundCode: "INSTALLATION_NOT_ACCESSIBLE",
-          forbiddenCode: "INSTALLATION_NOT_ACCESSIBLE",
+          notFoundCode: "INSTALLATION_REVOKED",
+          forbiddenCode: "INSUFFICIENT_PERMISSION",
         },
       );
       if (!Array.isArray(value.repositories)) {
@@ -366,7 +393,7 @@ export class GitHubClient {
       `${prefix}/git/ref/heads/${encodedBranch}`,
       this.apiBase,
     );
-    const refResponse = await githubFetch(
+    const refResponse = await this.fetchGitHub(
       refUrl,
       { headers: { ...githubHeaders, Authorization: `Bearer ${accessToken}` } },
       "GITHUB_UNAVAILABLE",
@@ -375,8 +402,8 @@ export class GitHubClient {
       refResponse,
       "GITHUB_UNAVAILABLE",
       {
-        notFoundCode: "CONTENT_NOT_FOUND",
-        forbiddenCode: "REPOSITORY_NOT_ACCESSIBLE",
+        notFoundCode: "PATH_NOT_FOUND",
+        forbiddenCode: "INSUFFICIENT_PERMISSION",
       },
     );
     const refObject = record(ref.object);
@@ -385,7 +412,7 @@ export class GitHubClient {
     }
     const commitSha = refObject.sha;
     const commitUrl = new URL(`${prefix}/git/commits/${encodeURIComponent(commitSha)}`, this.apiBase);
-    const commitResponse = await githubFetch(
+    const commitResponse = await this.fetchGitHub(
       commitUrl,
       { headers: { ...githubHeaders, Authorization: `Bearer ${accessToken}` } },
       "GITHUB_UNAVAILABLE",
@@ -394,8 +421,8 @@ export class GitHubClient {
       commitResponse,
       "GITHUB_UNAVAILABLE",
       {
-        notFoundCode: "CONTENT_NOT_FOUND",
-        forbiddenCode: "REPOSITORY_NOT_ACCESSIBLE",
+        notFoundCode: "PATH_NOT_FOUND",
+        forbiddenCode: "INSUFFICIENT_PERMISSION",
       },
     );
     const commitTree = record(commit.tree);
@@ -420,12 +447,12 @@ export class GitHubClient {
       const segment = segments[index];
       const entry = entries.find((candidate) => candidate.path === segment);
       if (!entry) {
-        throw new BrokerProblem(404, "CONTENT_NOT_FOUND", "The requested path was not found");
+        throw new BrokerProblem(404, "PATH_NOT_FOUND", "The requested path was not found");
       }
       const entryPath = segments.slice(0, index + 1).join("/");
       if (index < segments.length - 1) {
         if (entry.type !== "tree" || entry.mode !== "040000") {
-          throw new BrokerProblem(404, "CONTENT_NOT_FOUND", "The requested path was not found");
+          throw new BrokerProblem(404, "PATH_NOT_FOUND", "The requested path was not found");
         }
         treeSha = entry.sha;
         continue;
@@ -436,19 +463,19 @@ export class GitHubClient {
       }
       return this.getSourceFile(accessToken, prefix, repository, entryPath, commitSha, entry);
     }
-    throw new BrokerProblem(404, "CONTENT_NOT_FOUND", "The requested path was not found");
+    throw new BrokerProblem(404, "PATH_NOT_FOUND", "The requested path was not found");
   }
 
   private async getTree(accessToken: string, prefix: string, sha: string): Promise<GitTreeEntry[]> {
     const url = new URL(`${prefix}/git/trees/${encodeURIComponent(sha)}`, this.apiBase);
-    const response = await githubFetch(
+    const response = await this.fetchGitHub(
       url,
       { headers: { ...githubHeaders, Authorization: `Bearer ${accessToken}` } },
       "GITHUB_UNAVAILABLE",
     );
     const value = await parseJsonResponse<Record<string, unknown>>(response, "GITHUB_UNAVAILABLE", {
-      notFoundCode: "CONTENT_NOT_FOUND",
-      forbiddenCode: "REPOSITORY_NOT_ACCESSIBLE",
+      notFoundCode: "PATH_NOT_FOUND",
+      forbiddenCode: "INSUFFICIENT_PERMISSION",
     });
     if (value.truncated === true) {
       throw new BrokerProblem(422, "DIRECTORY_TOO_LARGE", "The requested directory is too large");
@@ -471,23 +498,23 @@ export class GitHubClient {
     entry: GitTreeEntry,
   ): Promise<SourceFile> {
     if (entry.type !== "blob" || (entry.mode !== "100644" && entry.mode !== "100755")) {
-      throw new BrokerProblem(415, "UNSUPPORTED_FILE_TYPE", "Only regular Mermaid or Markdown files can be opened");
+      throw new BrokerProblem(415, "UNSUPPORTED_FILE", "Only regular Mermaid or Markdown files can be opened");
     }
     if (!isSupportedPath(path)) {
-      throw new BrokerProblem(415, "UNSUPPORTED_FILE_TYPE", "Only .mmd, .mermaid, and .md files can be opened");
+      throw new BrokerProblem(415, "UNSUPPORTED_FILE", "Only .mmd, .mermaid, and .md files can be opened");
     }
     if (entry.size === null || entry.size > maxSourceBytes) {
       throw new BrokerProblem(413, "FILE_TOO_LARGE", "The selected source file is too large");
     }
     const url = new URL(`${prefix}/git/blobs/${encodeURIComponent(entry.sha)}`, this.apiBase);
-    const response = await githubFetch(
+    const response = await this.fetchGitHub(
       url,
       { headers: { ...githubHeaders, Authorization: `Bearer ${accessToken}` } },
       "GITHUB_UNAVAILABLE",
     );
     const value = await parseJsonResponse<Record<string, unknown>>(response, "GITHUB_UNAVAILABLE", {
-      notFoundCode: "CONTENT_NOT_FOUND",
-      forbiddenCode: "REPOSITORY_NOT_ACCESSIBLE",
+      notFoundCode: "PATH_NOT_FOUND",
+      forbiddenCode: "INSUFFICIENT_PERMISSION",
     });
     if (
       value.sha !== entry.sha ||
@@ -513,7 +540,7 @@ export class GitHubClient {
     try {
       source = new TextDecoder("utf-8", { fatal: true, ignoreBOM: false }).decode(bytes);
     } catch {
-      throw new BrokerProblem(415, "INVALID_TEXT_FILE", "The selected file is not valid UTF-8 text");
+      throw new BrokerProblem(415, "INVALID_UTF8", "The selected file is not valid UTF-8 text");
     }
     return {
       kind: "file",
@@ -525,6 +552,18 @@ export class GitHubClient {
       size: bytes.byteLength,
       source,
     };
+  }
+
+  private async fetchGitHub(url: URL, init: RequestInit, code: string): Promise<Response> {
+    if (this.remainingRequests <= 0) {
+      throw new BrokerProblem(
+        422,
+        "GITHUB_REQUEST_BUDGET_EXCEEDED",
+        "The requested GitHub source requires too many API requests",
+      );
+    }
+    this.remainingRequests -= 1;
+    return githubFetch(url, init, code);
   }
 }
 

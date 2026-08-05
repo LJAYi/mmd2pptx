@@ -72,4 +72,5 @@ The contents route walks the repository's current default-branch Git tree
 without following symlinks or submodules. It returns regular UTF-8 `.mmd`,
 `.mermaid`, and `.md` files up to 256 KiB; Markdown is returned as source text
 for the web app to select a Mermaid code block. Source contents are not stored
-by the broker.
+by the broker. Each broker request also has an absolute 90-call GitHub request
+budget, and repository paths are limited to 32 segments.

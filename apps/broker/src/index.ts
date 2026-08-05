@@ -26,7 +26,7 @@ const sessionIdleMs = 30 * 60 * 1000;
 const refreshWindowMs = 5 * 60 * 1000;
 const maxJsonBodyBytes = 4096;
 const maxRepositoryPathBytes = 1024;
-const maxRepositoryPathSegments = 100;
+const maxRepositoryPathSegments = 32;
 
 interface BrokerConfig {
   allowedOrigins: Set<string>;
@@ -103,8 +103,16 @@ async function enforceRateLimit(binding: RateLimit, key: string): Promise<void> 
   }
 }
 
-async function enforceSessionRateLimit(env: BrokerEnv, handle: string): Promise<void> {
-  await enforceRateLimit(env.SESSION_RATE_LIMITER, await sha256Base64Url(handle));
+async function enforceApiRateLimits(
+  request: Request,
+  env: BrokerEnv,
+  handle: string,
+): Promise<void> {
+  const ip = request.headers.get("CF-Connecting-IP") ?? "local-development";
+  await Promise.all([
+    enforceRateLimit(env.SESSION_RATE_LIMITER, await sha256Base64Url(`session:${handle}`)),
+    enforceRateLimit(env.SESSION_RATE_LIMITER, await sha256Base64Url(`ip:${ip}`)),
+  ]);
 }
 
 function jsonResponse(value: unknown, origin?: string, status = 200): Response {
@@ -519,7 +527,7 @@ async function route(request: Request, env: BrokerEnv): Promise<Response> {
   if (request.method === "GET" && url.pathname === "/api/github/session") {
     const origin = requestOrigin(request, config);
     const handle = parseBearer(request);
-    await enforceSessionRateLimit(env, handle);
+    await enforceApiRateLimits(request, env, handle);
     const session = await loadSession(env, handle);
     return jsonResponse(
       {
@@ -535,7 +543,7 @@ async function route(request: Request, env: BrokerEnv): Promise<Response> {
   if (request.method === "GET" && url.pathname === "/api/github/installations") {
     const origin = requestOrigin(request, config);
     const handle = parseBearer(request);
-    await enforceSessionRateLimit(env, handle);
+    await enforceApiRateLimits(request, env, handle);
     const session = await loadSession(env, handle);
     const cursor = url.searchParams.get("cursor");
     let page: CollectionPage<InstallationItem>;
@@ -578,7 +586,7 @@ async function route(request: Request, env: BrokerEnv): Promise<Response> {
   if (request.method === "GET" && repositoryListMatch?.[1]) {
     const origin = requestOrigin(request, config);
     const handle = parseBearer(request);
-    await enforceSessionRateLimit(env, handle);
+    await enforceApiRateLimits(request, env, handle);
     const installationId = positiveInteger(
       repositoryListMatch[1],
       "INVALID_INSTALLATION",
@@ -648,7 +656,7 @@ async function route(request: Request, env: BrokerEnv): Promise<Response> {
   if (request.method === "GET" && contentsMatch?.[1] && contentsMatch[2]) {
     const origin = requestOrigin(request, config);
     const handle = parseBearer(request);
-    await enforceSessionRateLimit(env, handle);
+    await enforceApiRateLimits(request, env, handle);
     const installationId = positiveInteger(
       contentsMatch[1],
       "INVALID_INSTALLATION",
@@ -675,7 +683,7 @@ async function route(request: Request, env: BrokerEnv): Promise<Response> {
     if (!repository) {
       throw new BrokerProblem(
         404,
-        "REPOSITORY_NOT_ACCESSIBLE",
+        "REPOSITORY_NOT_AVAILABLE",
         "The selected repository is not accessible through this installation",
       );
     }
@@ -719,7 +727,7 @@ async function route(request: Request, env: BrokerEnv): Promise<Response> {
   if (request.method === "POST" && url.pathname === "/auth/logout") {
     const origin = requestOrigin(request, config);
     const handle = parseBearer(request);
-    await enforceSessionRateLimit(env, handle);
+    await enforceApiRateLimits(request, env, handle);
     await deleteSession(env, handle);
     return new Response(null, {
       status: 204,

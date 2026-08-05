@@ -310,7 +310,105 @@ describe("repository and source browsing", () => {
       { headers: { Authorization: `Bearer ${handle}`, Origin: origin } },
     );
     expect(response.status).toBe(429);
-    expect(await response.json()).toMatchObject({ code: "GITHUB_RATE_LIMITED" });
+    expect(response.headers.get("Retry-After")).toBe("60");
+    expect(await response.json()).toMatchObject({
+      code: "GITHUB_RATE_LIMITED",
+      reset_at: expect.any(String),
+    });
+  });
+
+  it("rejects repository ID tampering before reading Git data", async () => {
+    const handle = await authenticatedHandle();
+    mockRepositories([repository(999, "diagrammer/other")]);
+
+    const response = await request(handle);
+    expect(response.status).toBe(404);
+    expect(await response.json()).toMatchObject({ code: "REPOSITORY_NOT_AVAILABLE" });
+  });
+
+  it("rejects symlinks and invalid UTF-8 source blobs", async () => {
+    const handle = await authenticatedHandle();
+    mockRepositories();
+    mockCommit();
+    outbound.json(
+      "GET",
+      "https://api.github.test/repos/diagrammer/docs/git/trees/tree-root",
+      200,
+      {
+        sha: "tree-root",
+        truncated: false,
+        tree: [{ path: "linked.mmd", mode: "120000", type: "blob", sha: "blob-link", size: 8 }],
+      },
+    );
+    const symlink = await request(handle, "linked.mmd");
+    expect(symlink.status).toBe(415);
+    expect(await symlink.json()).toMatchObject({ code: "UNSUPPORTED_FILE" });
+
+    mockRepositories();
+    mockCommit();
+    outbound.json(
+      "GET",
+      "https://api.github.test/repos/diagrammer/docs/git/trees/tree-root",
+      200,
+      {
+        sha: "tree-root",
+        truncated: false,
+        tree: [{ path: "invalid.mmd", mode: "100644", type: "blob", sha: "blob-invalid", size: 2 }],
+      },
+    );
+    outbound.json(
+      "GET",
+      "https://api.github.test/repos/diagrammer/docs/git/blobs/blob-invalid",
+      200,
+      {
+        sha: "blob-invalid",
+        encoding: "base64",
+        size: 2,
+        content: btoa(String.fromCharCode(0xc3, 0x28)),
+      },
+    );
+    const invalidUtf8 = await request(handle, "invalid.mmd");
+    expect(invalidUtf8.status).toBe(415);
+    expect(await invalidUtf8.json()).toMatchObject({ code: "INVALID_UTF8" });
+  });
+
+  it("rejects truncated trees and sanitizes inconsistent blob responses", async () => {
+    const handle = await authenticatedHandle();
+    mockRepositories();
+    mockCommit();
+    outbound.json(
+      "GET",
+      "https://api.github.test/repos/diagrammer/docs/git/trees/tree-root",
+      200,
+      { sha: "tree-root", truncated: true, tree: [] },
+    );
+    const truncated = await request(handle);
+    expect(truncated.status).toBe(422);
+    expect(await truncated.json()).toMatchObject({ code: "DIRECTORY_TOO_LARGE" });
+
+    mockRepositories();
+    mockCommit();
+    outbound.json(
+      "GET",
+      "https://api.github.test/repos/diagrammer/docs/git/trees/tree-root",
+      200,
+      {
+        sha: "tree-root",
+        truncated: false,
+        tree: [{ path: "diagram.mmd", mode: "100644", type: "blob", sha: "blob-good", size: 5 }],
+      },
+    );
+    outbound.json(
+      "GET",
+      "https://api.github.test/repos/diagrammer/docs/git/blobs/blob-good",
+      200,
+      { sha: "blob-wrong", encoding: "base64", size: 5, content: "c2VjcmV0" },
+    );
+    const inconsistent = await request(handle, "diagram.mmd");
+    expect(inconsistent.status).toBe(502);
+    const problem = await inconsistent.json() as { code: string; detail: string };
+    expect(problem.code).toBe("GITHUB_UNAVAILABLE");
+    expect(problem.detail).not.toContain("secret");
   });
 
   it("does not fetch oversized source blobs", async () => {
