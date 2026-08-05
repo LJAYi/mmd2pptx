@@ -1,4 +1,11 @@
-import type { CollectionPage, InstallationItem, StoredSession } from "./contracts";
+import type {
+  CollectionPage,
+  DirectoryItem,
+  DirectoryPage,
+  InstallationItem,
+  RepositoryItem,
+  StoredSession,
+} from "./contracts";
 import {
   constantTimeEqual,
   isPkceVerifier,
@@ -28,6 +35,15 @@ interface InstallationSnapshot {
   expiresAt: number;
   length: number;
   cursors: Record<string, number>;
+}
+
+interface RepositorySnapshot extends InstallationSnapshot {
+  installationId: number;
+}
+
+interface DirectorySnapshot extends InstallationSnapshot {
+  queryKey: string;
+  metadata: Omit<DirectoryPage, keyof CollectionPage<DirectoryItem>>;
 }
 
 function json(value: unknown, status = 200): Response {
@@ -166,12 +182,12 @@ export class AuthSessionObject implements DurableObject {
       session.idleExpiresAt = input.idleExpiresAt;
       delete session.refreshLease;
       await this.state.storage.put("session", session);
-      const snapshot = await this.state.storage.get<InstallationSnapshot>("installationSnapshot");
+      const snapshots = await this.snapshotExpiries();
       await this.state.storage.setAlarm(
         Math.min(
           session.expiresAt,
           session.idleExpiresAt,
-          snapshot?.expiresAt ?? Number.POSITIVE_INFINITY,
+          ...snapshots,
         ),
       );
       return json({ ok: true });
@@ -286,6 +302,104 @@ export class AuthSessionObject implements DurableObject {
       return page ? json(page) : json({ code: "INVALID_CURSOR" }, 400);
     }
 
+    if (request.method === "POST" && path === "/repositories/create") {
+      const input = await body<{ installationId: number; items: RepositoryItem[] }>(request);
+      const session = await this.activeSession(true);
+      if (!session) return json({ code: "SESSION_REQUIRED" }, 401);
+      const snapshot: RepositorySnapshot = {
+        id: randomToken(),
+        expiresAt: Date.now() + snapshotTtlMs,
+        length: input.items.length,
+        cursors: {},
+        installationId: input.installationId,
+      };
+      const chunks = this.chunks("repositoryPage", snapshot.id, input.items);
+      const page = this.page(snapshot, 0, input.items.slice(0, pageSize));
+      await this.replaceSnapshot("repository", snapshot, chunks);
+      await this.setSessionAlarm(session);
+      return json(page);
+    }
+
+    if (request.method === "POST" && path === "/repositories/page") {
+      const input = await body<{
+        installationId: number;
+        cursor: string;
+        authorizedRepositoryIds: number[];
+      }>(request);
+      if (!(await this.activeSession(true))) return json({ code: "SESSION_REQUIRED" }, 401);
+      const page = await this.state.storage.transaction(async (storage) => {
+        const snapshot = await storage.get<RepositorySnapshot>("repositorySnapshot");
+        const offset = snapshot?.cursors[input.cursor];
+        if (
+          !snapshot ||
+          snapshot.expiresAt <= Date.now() ||
+          snapshot.installationId !== input.installationId ||
+          offset === undefined
+        ) return null;
+        delete snapshot.cursors[input.cursor];
+        const items = await storage.get<RepositoryItem[]>(
+          this.snapshotPageKey("repositoryPage", snapshot.id, offset),
+        );
+        if (!items) return null;
+        const authorized = new Set(input.authorizedRepositoryIds);
+        if (items.some((item) => !authorized.has(item.id))) return "access-changed" as const;
+        const result = this.page(snapshot, offset, items);
+        await storage.put("repositorySnapshot", snapshot);
+        return result;
+      });
+      if (page === "access-changed") {
+        return json({ code: "REPOSITORY_ACCESS_CHANGED" }, 409);
+      }
+      return page ? json(page) : json({ code: "INVALID_CURSOR" }, 400);
+    }
+
+    if (request.method === "POST" && path === "/directory/create") {
+      const input = await body<{
+        queryKey: string;
+        items: DirectoryItem[];
+        metadata: Omit<DirectoryPage, keyof CollectionPage<DirectoryItem>>;
+      }>(request);
+      const session = await this.activeSession(true);
+      if (!session) return json({ code: "SESSION_REQUIRED" }, 401);
+      const snapshot: DirectorySnapshot = {
+        id: randomToken(),
+        expiresAt: Date.now() + snapshotTtlMs,
+        length: input.items.length,
+        cursors: {},
+        queryKey: input.queryKey,
+        metadata: input.metadata,
+      };
+      const chunks = this.chunks("directoryPage", snapshot.id, input.items);
+      const collection = this.page(snapshot, 0, input.items.slice(0, pageSize));
+      await this.replaceSnapshot("directory", snapshot, chunks);
+      await this.setSessionAlarm(session);
+      return json({ ...snapshot.metadata, ...collection });
+    }
+
+    if (request.method === "POST" && path === "/directory/page") {
+      const input = await body<{ queryKey: string; cursor: string }>(request);
+      if (!(await this.activeSession(true))) return json({ code: "SESSION_REQUIRED" }, 401);
+      const page = await this.state.storage.transaction(async (storage) => {
+        const snapshot = await storage.get<DirectorySnapshot>("directorySnapshot");
+        const offset = snapshot?.cursors[input.cursor];
+        if (
+          !snapshot ||
+          snapshot.expiresAt <= Date.now() ||
+          snapshot.queryKey !== input.queryKey ||
+          offset === undefined
+        ) return null;
+        delete snapshot.cursors[input.cursor];
+        const items = await storage.get<DirectoryItem[]>(
+          this.snapshotPageKey("directoryPage", snapshot.id, offset),
+        );
+        if (!items) return null;
+        const collection = this.page(snapshot, offset, items);
+        await storage.put("directorySnapshot", snapshot);
+        return { ...snapshot.metadata, ...collection };
+      });
+      return page ? json(page) : json({ code: "INVALID_CURSOR" }, 400);
+    }
+
     return json({ code: "NOT_FOUND" }, 404);
   }
 
@@ -296,20 +410,15 @@ export class AuthSessionObject implements DurableObject {
       await this.state.storage.deleteAll();
       return;
     }
-    const snapshot = await this.state.storage.get<InstallationSnapshot>("installationSnapshot");
-    if (snapshot && snapshot.expiresAt <= now) {
-      const pages = await this.state.storage.list({ prefix: "installationPage:" });
-      if (pages.size > 0) await this.state.storage.delete([...pages.keys()]);
-      await this.state.storage.delete("installationSnapshot");
+    for (const collection of ["installation", "repository", "directory"] as const) {
+      const snapshot = await this.state.storage.get<InstallationSnapshot>(`${collection}Snapshot`);
+      if (snapshot && snapshot.expiresAt <= now) {
+        const pages = await this.state.storage.list({ prefix: `${collection}Page:` });
+        if (pages.size > 0) await this.state.storage.delete([...pages.keys()]);
+        await this.state.storage.delete(`${collection}Snapshot`);
+      }
     }
-    const activeSnapshot = snapshot && snapshot.expiresAt > now ? snapshot : null;
-    await this.state.storage.setAlarm(
-      Math.min(
-        session.expiresAt,
-        session.idleExpiresAt,
-        activeSnapshot?.expiresAt ?? Number.POSITIVE_INFINITY,
-      ),
-    );
+    await this.setSessionAlarm(session);
   }
 
   private async activeSession(touch: boolean): Promise<StoredSession | null> {
@@ -322,23 +431,16 @@ export class AuthSessionObject implements DurableObject {
     if (touch) {
       session.idleExpiresAt = Math.min(session.expiresAt, now + sessionIdleMs);
       await this.state.storage.put("session", session);
-      const snapshot = await this.state.storage.get<InstallationSnapshot>("installationSnapshot");
-      await this.state.storage.setAlarm(
-        Math.min(
-          session.expiresAt,
-          session.idleExpiresAt,
-          snapshot?.expiresAt ?? Number.POSITIVE_INFINITY,
-        ),
-      );
+      await this.setSessionAlarm(session);
     }
     return session;
   }
 
-  private page(
+  private page<T>(
     snapshot: InstallationSnapshot,
     offset: number,
-    items: InstallationItem[],
-  ): CollectionPage<InstallationItem> {
+    items: T[],
+  ): CollectionPage<T> {
     const nextOffset = offset + items.length;
     const hasMore = nextOffset < snapshot.length;
     const cursor = hasMore ? randomToken() : null;
@@ -346,7 +448,50 @@ export class AuthSessionObject implements DurableObject {
     return { items, next_cursor: cursor, has_more: hasMore };
   }
 
-  private snapshotPageKey(snapshotId: string, offset: number): string {
-    return `installationPage:${snapshotId}:${offset}`;
+  private chunks<T>(prefix: string, snapshotId: string, items: T[]): Map<string, T[]> {
+    const chunks = new Map<string, T[]>();
+    for (let offset = 0; offset < items.length; offset += pageSize) {
+      chunks.set(
+        this.snapshotPageKey(prefix, snapshotId, offset),
+        items.slice(offset, offset + pageSize),
+      );
+    }
+    return chunks;
+  }
+
+  private async replaceSnapshot<T extends InstallationSnapshot>(
+    collection: "repository" | "directory",
+    snapshot: T,
+    chunks: Map<string, unknown>,
+  ): Promise<void> {
+    await this.state.storage.transaction(async (storage) => {
+      const previous = await storage.list({ prefix: `${collection}Page:` });
+      if (previous.size > 0) await storage.delete([...previous.keys()]);
+      if (chunks.size > 0) await storage.put(Object.fromEntries(chunks));
+      await storage.put(`${collection}Snapshot`, snapshot);
+    });
+  }
+
+  private snapshotPageKey(snapshotId: string, offset: number): string;
+  private snapshotPageKey(prefix: string, snapshotId: string, offset: number): string;
+  private snapshotPageKey(first: string, second: string | number, third?: number): string {
+    if (third === undefined) return `installationPage:${first}:${second}`;
+    return `${first}:${second}:${third}`;
+  }
+
+  private async snapshotExpiries(): Promise<number[]> {
+    const now = Date.now();
+    const expiries: number[] = [];
+    for (const key of ["installationSnapshot", "repositorySnapshot", "directorySnapshot"] as const) {
+      const snapshot = await this.state.storage.get<InstallationSnapshot>(key);
+      if (snapshot && snapshot.expiresAt > now) expiries.push(snapshot.expiresAt);
+    }
+    return expiries;
+  }
+
+  private async setSessionAlarm(session: StoredSession): Promise<void> {
+    await this.state.storage.setAlarm(
+      Math.min(session.expiresAt, session.idleExpiresAt, ...(await this.snapshotExpiries())),
+    );
   }
 }
