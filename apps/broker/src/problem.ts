@@ -3,6 +3,7 @@ export class BrokerProblem extends Error {
     readonly status: number,
     readonly code: string,
     message: string,
+    readonly rateLimit?: { retryAfterSeconds?: number; resetAt?: string },
   ) {
     super(message);
     this.name = "BrokerProblem";
@@ -19,10 +20,12 @@ export function problemResponse(problem: BrokerProblem, requestId: string, origi
   });
   if (origin) {
     headers.set("Access-Control-Allow-Origin", origin);
-    headers.set("Access-Control-Expose-Headers", "X-Request-Id");
+    headers.set("Access-Control-Expose-Headers", "Retry-After, X-Request-Id");
     headers.set("Vary", "Origin");
   }
-  if (problem.code === "BROKER_RATE_LIMITED") headers.set("Retry-After", "60");
+  const retryAfter = problem.rateLimit?.retryAfterSeconds ??
+    (problem.code === "BROKER_RATE_LIMITED" ? 60 : undefined);
+  if (retryAfter !== undefined) headers.set("Retry-After", String(retryAfter));
   return Response.json(
     {
       type: "about:blank",
@@ -31,6 +34,7 @@ export function problemResponse(problem: BrokerProblem, requestId: string, origi
       detail: problem.message,
       code: problem.code,
       request_id: requestId,
+      ...(problem.rateLimit?.resetAt ? { reset_at: problem.rateLimit.resetAt } : {}),
     },
     { status: problem.status, headers },
   );

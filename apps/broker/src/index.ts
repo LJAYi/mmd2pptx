@@ -1,8 +1,10 @@
 import type {
   BrokerEnv,
   CollectionPage,
+  DirectoryPage,
   GitHubTokenSet,
   InstallationItem,
+  RepositoryItem,
   StoredSession,
 } from "./contracts";
 import {
@@ -23,6 +25,8 @@ const sessionLifetimeMs = 8 * 60 * 60 * 1000;
 const sessionIdleMs = 30 * 60 * 1000;
 const refreshWindowMs = 5 * 60 * 1000;
 const maxJsonBodyBytes = 4096;
+const maxRepositoryPathBytes = 1024;
+const maxRepositoryPathSegments = 32;
 
 interface BrokerConfig {
   allowedOrigins: Set<string>;
@@ -99,8 +103,16 @@ async function enforceRateLimit(binding: RateLimit, key: string): Promise<void> 
   }
 }
 
-async function enforceSessionRateLimit(env: BrokerEnv, handle: string): Promise<void> {
-  await enforceRateLimit(env.SESSION_RATE_LIMITER, await sha256Base64Url(handle));
+async function enforceApiRateLimits(
+  request: Request,
+  env: BrokerEnv,
+  handle: string,
+): Promise<void> {
+  const ip = request.headers.get("CF-Connecting-IP") ?? "local-development";
+  await Promise.all([
+    enforceRateLimit(env.SESSION_RATE_LIMITER, await sha256Base64Url(`session:${handle}`)),
+    enforceRateLimit(env.SESSION_RATE_LIMITER, await sha256Base64Url(`ip:${ip}`)),
+  ]);
 }
 
 function jsonResponse(value: unknown, origin?: string, status = 200): Response {
@@ -162,6 +174,9 @@ async function internalJson<T>(response: Response, fallbackCode: string): Promis
   if (code === "INVALID_CURSOR") {
     throw new BrokerProblem(400, code, "The collection cursor is invalid or expired");
   }
+  if (code === "REPOSITORY_ACCESS_CHANGED") {
+    throw new BrokerProblem(409, code, "Repository access changed; reload the repository list");
+  }
   throw new BrokerProblem(502, fallbackCode, "The authentication service is temporarily unavailable");
 }
 
@@ -170,6 +185,34 @@ function parseBearer(request: Request): string {
   const match = /^Bearer ([A-Za-z0-9_-]{43})$/u.exec(authorization ?? "");
   if (!match?.[1]) throw new BrokerProblem(401, "SESSION_REQUIRED", "Sign in with GitHub to continue");
   return match[1];
+}
+
+function positiveInteger(value: string, code: string, label: string): number {
+  if (!/^[1-9]\d*$/u.test(value)) {
+    throw new BrokerProblem(400, code, `${label} must be a positive integer`);
+  }
+  const parsed = Number(value);
+  if (!Number.isSafeInteger(parsed)) {
+    throw new BrokerProblem(400, code, `${label} must be a positive integer`);
+  }
+  return parsed;
+}
+
+function repositoryPath(value: string | null): string {
+  const path = value ?? "";
+  const segments = path === "" ? [] : path.split("/");
+  if (
+    path.startsWith("/") ||
+    path.endsWith("/") ||
+    path.includes("\\") ||
+    path.includes("\0") ||
+    new TextEncoder().encode(path).byteLength > maxRepositoryPathBytes ||
+    segments.length > maxRepositoryPathSegments ||
+    segments.some((segment) => segment === "" || segment === "." || segment === "..")
+  ) {
+    throw new BrokerProblem(400, "INVALID_PATH", "Repository path is invalid");
+  }
+  return path;
 }
 
 async function loadSession(env: BrokerEnv, handle: string): Promise<StoredSession> {
@@ -484,7 +527,7 @@ async function route(request: Request, env: BrokerEnv): Promise<Response> {
   if (request.method === "GET" && url.pathname === "/api/github/session") {
     const origin = requestOrigin(request, config);
     const handle = parseBearer(request);
-    await enforceSessionRateLimit(env, handle);
+    await enforceApiRateLimits(request, env, handle);
     const session = await loadSession(env, handle);
     return jsonResponse(
       {
@@ -500,7 +543,7 @@ async function route(request: Request, env: BrokerEnv): Promise<Response> {
   if (request.method === "GET" && url.pathname === "/api/github/installations") {
     const origin = requestOrigin(request, config);
     const handle = parseBearer(request);
-    await enforceSessionRateLimit(env, handle);
+    await enforceApiRateLimits(request, env, handle);
     const session = await loadSession(env, handle);
     const cursor = url.searchParams.get("cursor");
     let page: CollectionPage<InstallationItem>;
@@ -538,10 +581,153 @@ async function route(request: Request, env: BrokerEnv): Promise<Response> {
     return jsonResponse(page, origin);
   }
 
+  const repositoryListMatch =
+    /^\/api\/github\/installations\/([^/]+)\/repositories$/u.exec(url.pathname);
+  if (request.method === "GET" && repositoryListMatch?.[1]) {
+    const origin = requestOrigin(request, config);
+    const handle = parseBearer(request);
+    await enforceApiRateLimits(request, env, handle);
+    const installationId = positiveInteger(
+      repositoryListMatch[1],
+      "INVALID_INSTALLATION",
+      "Installation ID",
+    );
+    const session = await loadSession(env, handle);
+    const cursor = url.searchParams.get("cursor");
+    let page: CollectionPage<RepositoryItem>;
+    if (cursor) {
+      const authorized = await accessToken(env, config, handle, session);
+      let repositories: RepositoryItem[];
+      try {
+        repositories = await github.listInstallationRepositories(
+          authorized.token,
+          installationId,
+        );
+      } catch (error) {
+        if (error instanceof BrokerProblem && error.code === "SESSION_EXPIRED") {
+          await deleteSession(env, handle);
+        }
+        throw error;
+      }
+      const response = await sessionStub(env, handle).fetch(
+        "https://session.internal/repositories/page",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            installationId,
+            cursor,
+            authorizedRepositoryIds: repositories.map((repository) => repository.id),
+          }),
+        },
+      );
+      page = await internalJson(response, "BROKER_UNAVAILABLE");
+    } else {
+      const authorized = await accessToken(env, config, handle, session);
+      let repositories: RepositoryItem[];
+      try {
+        repositories = await github.listInstallationRepositories(
+          authorized.token,
+          installationId,
+        );
+      } catch (error) {
+        if (error instanceof BrokerProblem && error.code === "SESSION_EXPIRED") {
+          await deleteSession(env, handle);
+        }
+        throw error;
+      }
+      const response = await sessionStub(env, handle).fetch(
+        "https://session.internal/repositories/create",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ installationId, items: repositories }),
+        },
+      );
+      page = await internalJson(response, "BROKER_UNAVAILABLE");
+    }
+    return jsonResponse(page, origin);
+  }
+
+  const contentsMatch =
+    /^\/api\/github\/installations\/([^/]+)\/repositories\/([^/]+)\/contents$/u.exec(
+      url.pathname,
+    );
+  if (request.method === "GET" && contentsMatch?.[1] && contentsMatch[2]) {
+    const origin = requestOrigin(request, config);
+    const handle = parseBearer(request);
+    await enforceApiRateLimits(request, env, handle);
+    const installationId = positiveInteger(
+      contentsMatch[1],
+      "INVALID_INSTALLATION",
+      "Installation ID",
+    );
+    const repositoryId = positiveInteger(
+      contentsMatch[2],
+      "INVALID_REPOSITORY",
+      "Repository ID",
+    );
+    const path = repositoryPath(url.searchParams.get("path"));
+    const session = await loadSession(env, handle);
+    const authorized = await accessToken(env, config, handle, session);
+    let repositories: RepositoryItem[];
+    try {
+      repositories = await github.listInstallationRepositories(authorized.token, installationId);
+    } catch (error) {
+      if (error instanceof BrokerProblem && error.code === "SESSION_EXPIRED") {
+        await deleteSession(env, handle);
+      }
+      throw error;
+    }
+    const repository = repositories.find((item) => item.id === repositoryId);
+    if (!repository) {
+      throw new BrokerProblem(
+        404,
+        "REPOSITORY_NOT_AVAILABLE",
+        "The selected repository is not accessible through this installation",
+      );
+    }
+    const queryKey = `${installationId}:${repositoryId}:${path}`;
+    const cursor = url.searchParams.get("cursor");
+    if (cursor) {
+      const response = await sessionStub(env, handle).fetch(
+        "https://session.internal/directory/page",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ queryKey, cursor }),
+        },
+      );
+      const page = await internalJson<DirectoryPage>(response, "BROKER_UNAVAILABLE");
+      return jsonResponse(page, origin);
+    }
+    let contents: Awaited<ReturnType<GitHubClient["getContents"]>>;
+    try {
+      contents = await github.getContents(authorized.token, repository, path);
+    } catch (error) {
+      if (error instanceof BrokerProblem && error.code === "SESSION_EXPIRED") {
+        await deleteSession(env, handle);
+      }
+      throw error;
+    }
+    if (contents.kind === "file") return jsonResponse(contents, origin);
+    const { items, ...metadata } = contents;
+    const response = await sessionStub(env, handle).fetch(
+      "https://session.internal/directory/create",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ queryKey, items, metadata }),
+      },
+    );
+    const page = await internalJson<DirectoryPage>(response, "BROKER_UNAVAILABLE");
+    return jsonResponse(page, origin);
+  }
+
   if (request.method === "POST" && url.pathname === "/auth/logout") {
     const origin = requestOrigin(request, config);
     const handle = parseBearer(request);
-    await enforceSessionRateLimit(env, handle);
+    await enforceApiRateLimits(request, env, handle);
     await deleteSession(env, handle);
     return new Response(null, {
       status: 204,

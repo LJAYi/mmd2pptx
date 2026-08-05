@@ -52,6 +52,47 @@ export interface InstallationItem {
   suspendedAt: string | null;
 }
 
+export interface RepositoryItem {
+  id: number;
+  installationId: number;
+  name: string;
+  fullName: string;
+  owner: {
+    login: string;
+    avatarUrl: string;
+  };
+  private: boolean;
+  defaultBranch: string;
+}
+
+export interface DirectoryItem {
+  name: string;
+  path: string;
+  type: "directory" | "file";
+  sha: string;
+  size: number | null;
+  supported: boolean;
+}
+
+export interface DirectoryPage extends CollectionPage<DirectoryItem> {
+  kind: "directory";
+  repositoryId: number;
+  path: string;
+  ref: string;
+  commitSha: string;
+}
+
+export interface SourceFile {
+  kind: "file";
+  repositoryId: number;
+  path: string;
+  ref: string;
+  commitSha: string;
+  blobSha: string;
+  size: number;
+  source: string;
+}
+
 export interface CollectionPage<T> {
   items: T[];
   next_cursor: string | null;
