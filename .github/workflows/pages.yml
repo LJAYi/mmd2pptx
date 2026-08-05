@@ -41,6 +41,7 @@ jobs:
       - name: Build site
         env:
           MMD2PPTX_BASE_PATH: /mmd2pptx/
+          VITE_GITHUB_BROKER_ORIGIN: https://mmd2pptx-github-broker.disky.workers.dev
           VITE_REPOSITORY_URL: https://github.com/LJAYi/mmd2pptx
         run: pnpm pages:build
 

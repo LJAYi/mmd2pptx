@@ -1,6 +1,6 @@
 # Read-only GitHub App MVP
 
-Status: proposed
+Status: implementation in progress
 
 ## Product statement
 
@@ -18,7 +18,8 @@ where Mermaid is rendered and artifacts are generated.
 
 - Install and authorize a GitHub App for selected repositories.
 - List repositories the signed-in user can access through an installation.
-- Browse the default branch and open `.mmd` or `.mermaid` files.
+- Browse the default branch and open `.mmd`, `.mermaid`, or Mermaid code blocks
+  from Markdown files.
 - Load the selected source into the existing editor, preview, and export it with
   the existing format and PowerPoint-mode controls.
 - Support private repositories without asking users for a personal access token.
@@ -30,7 +31,6 @@ where Mermaid is rendered and artifacts are generated.
 
 The MVP does not:
 
-- parse Mermaid code blocks from Markdown;
 - search an entire repository;
 - select a branch, tag, or commit;
 - write generated files to a repository or create a pull request;
@@ -47,8 +47,8 @@ must be designed as later, separately permissioned features.
 2. If there is no active session, the app opens the GitHub authorization flow.
 3. If the GitHub App is not installed for a usable repository, the user is sent
    to GitHub's installation picker and returns to the web app afterward.
-4. The user chooses an installation, repository, folder, and Mermaid file on the
-   repository's default branch.
+4. The user chooses an installation, repository, folder, and Mermaid source on
+   the repository's default branch.
 5. The selected UTF-8 source replaces the editor content only after an explicit
    confirmation when the editor contains unsaved changes.
 6. The existing browser pipeline renders the source and generates the selected
@@ -71,17 +71,15 @@ GitHub Pages web app
   |       | authenticated HTTPS requests
   |       v
   |   authentication broker
-  |       |-- server-side user session
-  |       |-- GitHub App private key
-  |       `-- short-lived installation tokens
+  |       `-- encrypted, expiring GitHub App user session
   |               |
   `---------------|----> GitHub REST API
                   `----> session store / secret manager
 ```
 
-GitHub Pages cannot safely store a GitHub App private key or client secret, mint
-installation tokens, or implement callbacks. A small server-side authentication
-broker is therefore required even though the UI remains on GitHub Pages.
+GitHub Pages cannot safely store the GitHub App client secret, protect user
+tokens, or implement callbacks. A small server-side authentication broker is
+therefore required even though the UI remains on GitHub Pages.
 
 The broker is not a conversion API. It retrieves authorized source files and
 returns their text to the browser. Mermaid rendering, IR creation, validation,
@@ -110,11 +108,11 @@ The broker owns all GitHub credentials and server sessions:
 6. The broker creates a server-side session containing the encrypted GitHub user
    and refresh tokens and returns an opaque, short-lived `mmd2pptx` session
    handle. The web app keeps the handle in memory; it must not use local storage.
-7. Before minting an installation token, the broker uses the signed-in user's
-   token to enumerate that user's repositories for the installation. It scopes
-   the installation token to the intersection of the user-accessible and
-   installation-accessible repository sets. Every contents read recomputes or
-   revalidates this intersection.
+7. Before each contents read, the broker uses the expiring GitHub App user token
+   to enumerate repositories available to that user through the selected
+   installation. GitHub scopes the token to the intersection of the user, App
+   permission, and installation repository selection; the broker revalidates
+   that intersection for every read.
 
 The exchange-code pattern avoids depending on third-party cookies when the
 Pages site and broker have different registrable domains. If a custom domain
@@ -196,7 +194,8 @@ children. It returns file contents only when all of the following are true:
   for the normalized path without following links;
 - the verified entry has type `blob` and mode `100644` or `100755`; symlink mode
   `120000`, submodule type `commit`/mode `160000`, and unknown modes are rejected;
-- the extension is `.mmd` or `.mermaid`, case-insensitively;
+- the extension is `.mmd`, `.mermaid`, or `.md`, case-insensitively; Markdown
+  source is returned for the browser to select a Mermaid code block;
 - the file is UTF-8 text and no larger than the configured source limit;
 - the source is fetched from the Git Data blob endpoint using the verified entry
   SHA, and the returned SHA, size, encoding, and media type match that entry.
@@ -251,10 +250,11 @@ GitHub-outage states. Closing the picker leaves the current diagram untouched.
 
 ### Credential handling
 
-- Store the GitHub App private key and client secret in a managed secret store.
+- Store the GitHub App client secret and session-encryption key in Worker
+  secrets. The user-token MVP does not require an App private key.
 - Encrypt GitHub user tokens at rest inside the session store.
-- Keep installation tokens server-side, scope them to the selected repository,
-  and discard or expire them promptly.
+- Keep GitHub user and refresh tokens server-side and encrypted; never return
+  them to browser code.
 - Rotate secrets without redeploying browser assets.
 - Make session handles high-entropy, short-lived, revocable, and unusable after
   logout. Apply idle and absolute expiry.
@@ -264,11 +264,11 @@ GitHub-outage states. Closing the picker leaves the current diagram untouched.
 
 ### Request authorization
 
-Every repository request revalidates the session, user/installation repository
-intersection, installation ID, repository ID, default branch, commit/tree
-identity, and normalized path. IDs and paths supplied by the browser are
-untrusted. The broker must not accept arbitrary GitHub URLs or forward arbitrary
-API routes.
+Every repository request revalidates the session, GitHub user token,
+installation repository intersection, installation ID, repository ID, default
+branch, commit/tree identity, and normalized path. IDs and paths supplied by the
+browser are untrusted. The broker must not accept arbitrary GitHub URLs or
+forward arbitrary API routes.
 
 Apply per-session and per-IP rate limits, request timeouts, maximum response
 sizes, and conservative GitHub pagination limits. Return a specific reset time

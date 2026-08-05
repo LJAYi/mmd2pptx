@@ -48,6 +48,19 @@ test("offers quick links to related diagram editors", async ({ page }) => {
   }
 });
 
+test("shows the GitHub source entry without breaking unconfigured deployments", async ({ page }) => {
+  await page.goto("/");
+
+  const button = page.getByRole("button", { name: "Open from GitHub" });
+  await expect(button).toBeVisible();
+  await expect(button).toBeDisabled();
+  await expect(button).toHaveAttribute(
+    "title",
+    "GitHub integration is not configured for this deployment.",
+  );
+  await expect(page.locator("#github-picker")).toContainText("Open Mermaid from GitHub");
+});
+
 test("uses the project logo with SVG and PNG favicons", async ({ page }) => {
   await page.goto("/");
 
