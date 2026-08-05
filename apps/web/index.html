@@ -7,6 +7,10 @@
       name="description"
       content="Convert Mermaid flowcharts into editable PowerPoint presentations, locally in your browser."
     />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; connect-src 'self' https://mmd2pptx-github-broker.disky.workers.dev http://localhost:8787; img-src 'self' data:; style-src 'self' 'unsafe-inline'; font-src 'self' data:; script-src 'self'; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'none'"
+    />
     <meta name="theme-color" content="#f4f3ef" />
     <link rel="icon" type="image/png" sizes="64x64" href="./favicon.png" />
     <link rel="icon" type="image/svg+xml" href="./favicon.svg" />

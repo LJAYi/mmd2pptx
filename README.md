@@ -27,14 +27,16 @@ slide.
 
 | Surface | Purpose |
 | --- | --- |
-| Web app | Paste Mermaid, adjust layout, and export locally to PPTX, SVG, draw.io, or JSON Canvas |
+| Web app | Paste, open locally, or read Mermaid from an authorized GitHub repository, then export in the browser |
 | `@mmd2pptx/core` | Browser and Node SDK for parsing and diagnostic-aware forward exporters |
 | `mmd2pptx` | Main CLI for Mermaid-to-PPTX/SVG/draw.io/JSON Canvas conversion |
 | GitHub Pages | Hosts the static web app without receiving diagram source |
-| GitHub broker (development) | Separate read-only GitHub App authentication and installation-listing service; not a conversion API |
+| GitHub broker | Deployed read-only GitHub App broker for authentication, repository browsing, and bounded source reads; not a conversion API |
 
-The static app and SDK perform conversion locally. Diagram contents do not need
-to leave the user's device.
+The static app and SDK perform conversion locally. Pasted and local-file source
+never leaves the browser. In GitHub mode, the broker retrieves only the selected
+source file, does not retain it, and returns it to the browser for local
+rendering and export.
 
 The project logo and reusable light/dark variants live in
 [`apps/web/public/brand`](apps/web/public/brand). See the
@@ -42,12 +44,16 @@ The project logo and reusable light/dark variants live in
 
 ## Web app
 
-Paste Mermaid or open a local `.mmd`/`.mermaid` file. The adjustment workspace
-supports node drag/resize, multi-select, keyboard nudging, align/distribute,
-layer order, connection ports, obstacle-aware routing, edge-label placement,
-Bézier control handles, and visual Group/Ungroup. Undo/redo and an optional
-versioned layout sidecar preserve these edits without rewriting Mermaid source;
-stable nodes keep their overrides when the source changes.
+Paste Mermaid, open a local `.mmd`/`.mermaid` file, or choose **Open from
+GitHub** to browse repositories authorized for the read-only GitHub App. The
+GitHub picker supports `.mmd`, `.mermaid`, and Mermaid code blocks in Markdown;
+GitHub credentials remain in the broker and generated files remain local. The
+adjustment workspace supports node drag/resize, multi-select, keyboard nudging,
+align/distribute, layer order, connection ports, obstacle-aware routing,
+edge-label placement, Bézier control handles, and visual Group/Ungroup.
+Undo/redo and an optional versioned layout sidecar preserve these edits without
+rewriting Mermaid source; stable nodes keep their overrides when the source
+changes.
 
 The preview viewer supports mouse or touch dragging, pointer-centered wheel
 zoom, 100% reset, fit-to-view, fit-to-width, an expanded view, and copying the
@@ -58,7 +64,8 @@ are applied outside the SVG, so changing the preview never changes PPTX output.
 For Flowcharts, the browser also merges Mermaid FlowDB node, edge, and nested
 subgraph identity with SVG geometry. If source semantics are unavailable, the
 same renderer-metadata and diagnosed geometry fallbacks used by direct SVG
-callers remain active. Diagram contents and layout files stay in the browser.
+callers remain active. Rendering, layout state, and generated artifacts stay in
+the browser.
 
 Install dependencies and start the development server:
 
@@ -203,10 +210,11 @@ A future HTTP service should call the same core package rather than creating a
 second conversion implementation.
 
 The read-only GitHub App uses a different, narrowly scoped service in
-[`apps/broker`](apps/broker). Its current authentication shell runs on
-Cloudflare Workers, keeps GitHub credentials in encrypted server-side sessions,
-and lists installations without reading repository files. It is not deployed by
-GitHub Pages and does not perform diagram conversion.
+[`apps/broker`](apps/broker). The Cloudflare Worker keeps GitHub credentials in
+encrypted server-side sessions, lists repositories available through the App,
+and returns selected, size-limited Mermaid or Markdown source files. It neither
+stores source nor performs diagram conversion; GitHub Pages still renders and
+exports entirely in the browser.
 
 ## Development
 

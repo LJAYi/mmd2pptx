@@ -48,6 +48,216 @@ test("offers quick links to related diagram editors", async ({ page }) => {
   }
 });
 
+test("shows the configured GitHub source entry", async ({ page }) => {
+  await page.goto("/");
+
+  const button = page.getByRole("button", { name: "Open from GitHub" });
+  await expect(button).toBeVisible();
+  await expect(button).toBeEnabled();
+  await expect(page.locator("#github-picker")).toContainText("Open Mermaid from GitHub");
+});
+
+test("opens a GitHub source through the mocked broker and exports it locally", async ({
+  context,
+  page,
+}, testInfo) => {
+  const brokerOrigin = "https://mmd2pptx-github-broker.disky.workers.dev";
+  const appOrigin = "http://127.0.0.1:4173";
+  const githubSource = "flowchart LR\n  GitHub[GitHub source] --> Slide[Editable slide]";
+  const requestedUrls: string[] = [];
+  let fileRequestCount = 0;
+  let releaseFirstFileResponse: (() => void) | undefined;
+  const firstFileResponseGate = new Promise<void>((resolve) => {
+    releaseFirstFileResponse = resolve;
+  });
+
+  context.on("request", (request) => requestedUrls.push(request.url()));
+  await context.route(`${brokerOrigin}/**`, async (route) => {
+    const request = route.request();
+    const url = new URL(request.url());
+    const corsHeaders = {
+      "Access-Control-Allow-Headers": "Authorization, Content-Type",
+      "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+      "Access-Control-Allow-Origin": appOrigin,
+      "Content-Type": "application/json; charset=utf-8",
+    };
+
+    if (request.method() === "OPTIONS") {
+      await route.fulfill({ status: 204, headers: corsHeaders });
+      return;
+    }
+    if (url.pathname === "/auth/github/start") {
+      expect(url.searchParams.get("return_origin")).toBe(appOrigin);
+      expect(url.searchParams.get("code_challenge_method")).toBe("S256");
+      expect(url.searchParams.get("code_challenge")).toMatch(/^[A-Za-z0-9_-]{43}$/u);
+      await route.fulfill({
+        status: 200,
+        contentType: "text/html",
+        body: `<!doctype html><script>window.opener.postMessage({type:"mmd2pptx:github-auth",exchangeCode:"mock-exchange-code"},${JSON.stringify(appOrigin)});</script>`,
+      });
+      return;
+    }
+    if (url.pathname === "/auth/session/exchange") {
+      const body = request.postDataJSON() as { exchangeCode: string; codeVerifier: string };
+      expect(body.exchangeCode).toBe("mock-exchange-code");
+      expect(body.codeVerifier).toMatch(/^[A-Za-z0-9_-]{64}$/u);
+      await route.fulfill({
+        status: 201,
+        headers: corsHeaders,
+        json: {
+          session_handle: "s".repeat(43),
+          session: {
+            signed_in: true,
+            actor: { id: 9, login: "diagrammer", avatarUrl: "https://avatars.example/9" },
+            expires_at: "2026-08-06T00:00:00.000Z",
+            install_url: "https://github.com/apps/mmd2pptx/installations/new",
+          },
+        },
+      });
+      return;
+    }
+    expect(request.headers().authorization).toBe(`Bearer ${"s".repeat(43)}`);
+    if (url.pathname === "/api/github/installations") {
+      await route.fulfill({
+        status: 200,
+        headers: corsHeaders,
+        json: {
+          items: [{
+            id: 77,
+            account: { id: 9, login: "diagrammer", avatarUrl: "https://avatars.example/9", type: "User" },
+            repositorySelection: "selected",
+            suspendedAt: null,
+          }],
+          next_cursor: null,
+          has_more: false,
+        },
+      });
+      return;
+    }
+    if (url.pathname === "/api/github/installations/77/repositories") {
+      await route.fulfill({
+        status: 200,
+        headers: corsHeaders,
+        json: {
+          items: [{
+            id: 88,
+            installationId: 77,
+            name: "docs",
+            fullName: "diagrammer/docs",
+            owner: { login: "diagrammer", avatarUrl: "https://avatars.example/9" },
+            private: true,
+            defaultBranch: "main",
+          }],
+          next_cursor: null,
+          has_more: false,
+        },
+      });
+      return;
+    }
+    if (url.pathname === "/api/github/installations/77/repositories/88/contents") {
+      if (url.searchParams.get("path") === "architecture.mmd") {
+        fileRequestCount += 1;
+        if (fileRequestCount === 1) await firstFileResponseGate;
+        await route.fulfill({
+          status: 200,
+          headers: corsHeaders,
+          json: {
+            kind: "file",
+            repositoryId: 88,
+            path: "architecture.mmd",
+            ref: "main",
+            commitSha: "1234567890abcdef",
+            blobSha: "abcdef1234567890",
+            size: githubSource.length,
+            source: githubSource,
+          },
+        });
+      } else {
+        await route.fulfill({
+          status: 200,
+          headers: corsHeaders,
+          json: {
+            kind: "directory",
+            repositoryId: 88,
+            path: "",
+            ref: "main",
+            commitSha: "1234567890abcdef",
+            items: [{
+              name: "architecture.mmd",
+              path: "architecture.mmd",
+              type: "file",
+              sha: "abcdef1234567890",
+              size: githubSource.length,
+              supported: true,
+            }],
+            next_cursor: null,
+            has_more: false,
+          },
+        });
+      }
+      return;
+    }
+    await route.fulfill({ status: 404, headers: corsHeaders, json: { code: "NOT_FOUND" } });
+  });
+
+  await page.goto("/");
+  await expect(page.locator("#render-state b")).toHaveText("Rendered");
+  const originalSource = "flowchart LR\n  Current[Unsaved source] --> Kept[Keep me]";
+  await page.locator("#source").fill(originalSource);
+
+  await page.getByRole("button", { name: "Open from GitHub" }).click();
+  const popupPromise = context.waitForEvent("page");
+  await page.getByRole("button", { name: "Connect GitHub" }).click();
+  await popupPromise;
+  const pickerStatus = page.locator("[data-github-picker-status]");
+  await expect(page.locator('[data-installation-id="77"]')).toBeVisible();
+  await expect(pickerStatus).toHaveAttribute("aria-busy", "false");
+  await page.locator('[data-installation-id="77"]').click();
+  await expect(pickerStatus).toHaveAttribute("aria-busy", "false");
+  await page.locator('[data-repository-id="88"]').click();
+  const sourceFile = page.locator('[data-entry-path="architecture.mmd"]');
+  await expect(sourceFile).toBeVisible();
+
+  const delayedResponse = page.waitForResponse((response) =>
+    new URL(response.url()).searchParams.get("path") === "architecture.mmd"
+  );
+  await sourceFile.click();
+  await expect(pickerStatus).toContainText("Opening architecture.mmd");
+  await page.getByRole("button", { name: "Close GitHub source picker" }).click();
+  releaseFirstFileResponse?.();
+  await delayedResponse;
+  await expect(pickerStatus).toHaveAttribute("aria-busy", "false");
+  await expect(page.locator("#source")).toHaveValue(originalSource);
+
+  await page.getByRole("button", { name: "Open from GitHub" }).click();
+  await expect(sourceFile).toBeVisible();
+  page.once("dialog", async (dialog) => dialog.dismiss());
+  await sourceFile.click();
+  await expect(page.locator("#source")).toHaveValue(originalSource);
+  await expect(pickerStatus).toContainText(
+    "Your current diagram was kept",
+  );
+
+  page.once("dialog", async (dialog) => dialog.accept());
+  await sourceFile.click();
+  await expect(page.locator("#github-picker")).not.toBeVisible();
+  await expect(page.locator("#source")).toHaveValue(githubSource);
+  await expect(page.locator("#source-origin")).toHaveText("diagrammer/docs · architecture.mmd");
+  await expect(page.locator("#source-origin")).toHaveAttribute("title", "main @ 1234567");
+  await expect(page.locator("#render-state b")).toHaveText("Rendered");
+  await expect(page.locator("#preview svg")).toBeVisible();
+
+  const downloadPromise = page.waitForEvent("download");
+  await page.locator("#export").click();
+  const download = await downloadPromise;
+  const downloadPath = testInfo.outputPath(download.suggestedFilename());
+  await download.saveAs(downloadPath);
+  const file = await readFile(downloadPath);
+  expect(file.byteLength).toBeGreaterThan(1_000);
+  expect([...file.subarray(0, 4)]).toEqual([0x50, 0x4b, 0x03, 0x04]);
+  expect(requestedUrls.some((url) => new URL(url).pathname === "/v1/convert")).toBe(false);
+});
+
 test("uses the project logo with SVG and PNG favicons", async ({ page }) => {
   await page.goto("/");
 

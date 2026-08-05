@@ -8,6 +8,7 @@ import {
 import mermaid from "mermaid";
 
 import { EXAMPLE_DIAGRAM, MINI_EXAMPLE } from "./example.js";
+import { GitHubSourcePicker, type GitHubSourceProvenance } from "./github-source.js";
 import { SvgLayoutEditor, type LayoutEditorState } from "./layout/index.js";
 import { SvgPanZoomViewer } from "./svg-viewer.js";
 import "./styles.css";
@@ -70,7 +71,7 @@ app.innerHTML = `
       </a>
       <div class="topbar-note">
         <span class="privacy-dot" aria-hidden="true"></span>
-        Your diagram stays in this browser
+        Rendering and exports stay in this browser
       </div>
       <a id="source-link" class="github-link" target="_blank" rel="noreferrer">
         Open source <span aria-hidden="true">↗</span>
@@ -94,6 +95,7 @@ app.innerHTML = `
               <h2>Mermaid source</h2>
             </div>
             <div class="examples">
+              <button class="text-button github-open-button" id="github-open" type="button">Open from GitHub</button>
               <button class="text-button" id="source-file-open" type="button">Open .mmd</button>
               <input id="source-file" type="file" accept=".mmd,.mermaid,text/plain" hidden />
               <button class="text-button" id="mini-example" type="button">Simple example</button>
@@ -106,6 +108,7 @@ app.innerHTML = `
           </div>
           <footer class="panel-footer editor-footer">
             <span id="source-count">0 lines · 0 characters</span>
+            <span id="source-origin" class="source-origin">Local source</span>
             <span class="keyboard-hint"><kbd>⌘</kbd><kbd>↵</kbd> export</span>
           </footer>
         </article>
@@ -288,7 +291,7 @@ app.innerHTML = `
             <span>Export PowerPoint</span>
             <i aria-hidden="true">↓</i>
           </button>
-          <small>No upload. No account. No diagram data retained.</small>
+          <small>Local conversion. GitHub access is optional and read-only.</small>
         </div>
       </section>
 
@@ -327,6 +330,20 @@ app.innerHTML = `
       <p><strong>mmd2pptx</strong> · clean-room, open-source Mermaid conversion</p>
       <p>Built for editable diagrams and verifiable output.</p>
     </footer>
+
+    <dialog id="github-picker" class="github-picker" aria-labelledby="github-picker-title">
+      <div class="github-picker-head">
+        <div>
+          <p class="eyebrow">READ-ONLY GITHUB APP</p>
+          <h2 id="github-picker-title">Open from GitHub</h2>
+        </div>
+        <button class="github-close" type="button" data-github-action="close" aria-label="Close GitHub source picker">×</button>
+      </div>
+      <div class="github-picker-session" data-github-picker-account></div>
+      <p class="github-picker-status" data-github-picker-status role="status" aria-live="polite"></p>
+      <div class="github-picker-body" data-github-picker-body></div>
+      <footer>Read-only access · Mermaid rendering and export stay in your browser</footer>
+    </dialog>
   </div>`;
 
 const elements = {
@@ -344,6 +361,8 @@ const elements = {
   fileSuffix: required<HTMLElement>("#file-suffix"),
   fitPreview: required<HTMLButtonElement>("#fit-preview"),
   fullExample: required<HTMLButtonElement>("#full-example"),
+  githubOpen: required<HTMLButtonElement>("#github-open"),
+  githubPicker: required<HTMLDialogElement>("#github-picker"),
   layout: required<HTMLSelectElement>("#layout"),
   layoutArrange: required<HTMLSelectElement>("#layout-arrange"),
   layoutClearSaved: required<HTMLButtonElement>("#layout-clear-saved"),
@@ -378,6 +397,7 @@ const elements = {
   sourceFileOpen: required<HTMLButtonElement>("#source-file-open"),
   sourceLink: required<HTMLAnchorElement>("#source-link"),
   sourceCount: required<HTMLSpanElement>("#source-count"),
+  sourceOrigin: required<HTMLSpanElement>("#source-origin"),
   theme: required<HTMLSelectElement>("#theme"),
 };
 
@@ -407,6 +427,31 @@ let renderSequence = 0;
 let lastState: RenderState = { diagnostics: [] };
 let semanticDiagnostics: ConversionDiagnostic[] = [];
 let semantics: MermaidSemanticGraph | undefined;
+let sourceDirty = false;
+let sourceProvenance: GitHubSourceProvenance | null = null;
+
+new GitHubSourcePicker({
+  brokerOrigin: import.meta.env.VITE_GITHUB_BROKER_ORIGIN,
+  button: elements.githubOpen,
+  dialog: elements.githubPicker,
+  onOpenSource: (source, provenance) => {
+    if (
+      sourceDirty &&
+      !window.confirm("Replace the Mermaid source you are currently editing?")
+    ) return false;
+    layoutEditor.loadPersistedForNextSource();
+    elements.source.value = source;
+    sourceDirty = false;
+    sourceProvenance = provenance;
+    const baseName = provenance.path.split("/").pop()?.replace(/\.(?:mmd|mermaid|md)$/iu, "").trim();
+    if (baseName) elements.fileName.value = baseName;
+    updateSourceCount();
+    updateSourceOrigin();
+    scheduleRender(0);
+    elements.source.focus();
+    return true;
+  },
+});
 
 updateExportControls();
 elements.source.value = EXAMPLE_DIAGRAM;
@@ -414,7 +459,9 @@ updateSourceCount();
 scheduleRender(0);
 
 elements.source.addEventListener("input", () => {
+  sourceDirty = true;
   updateSourceCount();
+  updateSourceOrigin();
   scheduleRender();
 });
 elements.sourceFileOpen.addEventListener("click", () => elements.sourceFile.click());
@@ -501,7 +548,10 @@ function required<T extends Element>(selector: string): T {
 
 function loadExample(source: string): void {
   elements.source.value = source;
+  sourceDirty = true;
+  sourceProvenance = null;
   updateSourceCount();
+  updateSourceOrigin();
   scheduleRender(0);
   elements.source.focus();
 }
@@ -510,6 +560,16 @@ function updateSourceCount(): void {
   const value = elements.source.value;
   const lines = value ? value.split("\n").length : 0;
   elements.sourceCount.textContent = `${lines} ${lines === 1 ? "line" : "lines"} · ${value.length} characters`;
+}
+
+function updateSourceOrigin(): void {
+  if (!sourceProvenance) {
+    elements.sourceOrigin.textContent = "Local source";
+    elements.sourceOrigin.removeAttribute("title");
+    return;
+  }
+  elements.sourceOrigin.textContent = `${sourceDirty ? "Edited · " : ""}${sourceProvenance.repository} · ${sourceProvenance.path}`;
+  elements.sourceOrigin.title = `${sourceProvenance.ref} @ ${sourceProvenance.commitSha.slice(0, 7)}`;
 }
 
 function scheduleRender(delay = 320): void {
@@ -875,6 +935,9 @@ async function importMermaidFile(): Promise<void> {
   elements.sourceFile.value = "";
   if (!file) return;
   if (file.size > MAX_MERMAID_FILE_BYTES) {
+    window.clearTimeout(debounceTimer);
+    renderSequence += 1;
+    inspectionSequence += 1;
     lastState = {
       diagnostics: [{
         code: "MERMAID_FILE_TOO_LARGE",
@@ -888,9 +951,12 @@ async function importMermaidFile(): Promise<void> {
   }
   layoutEditor.loadPersistedForNextSource();
   elements.source.value = await file.text();
+  sourceDirty = true;
+  sourceProvenance = null;
   const baseName = file.name.replace(/\.(?:mmd|mermaid)$/i, "").trim();
   if (baseName) elements.fileName.value = baseName;
   updateSourceCount();
+  updateSourceOrigin();
   scheduleRender(0);
   elements.source.focus();
 }

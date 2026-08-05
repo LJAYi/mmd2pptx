@@ -7,8 +7,8 @@
     "dev": "vite",
     "build": "tsc --noEmit -p tsconfig.json && vite build",
     "check": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.e2e.json",
-    "test": "vitest run tests/layout",
-    "e2e": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.e2e.json && vite build && playwright test",
+    "test": "vitest run tests/layout tests/github-source.test.ts",
+    "e2e": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.e2e.json && VITE_GITHUB_BROKER_ORIGIN=https://mmd2pptx-github-broker.disky.workers.dev vite build && playwright test",
     "e2e:install": "playwright install chromium",
     "preview": "vite preview"
   },
