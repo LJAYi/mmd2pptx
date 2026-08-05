@@ -80,6 +80,7 @@ interface CollectionPage<T> {
 interface BrokerProblem {
   code?: string;
   detail?: string;
+  reset_at?: string;
   title?: string;
 }
 
@@ -107,6 +108,7 @@ export class GitHubSourcePicker {
   private selectedInstallation: Installation | null = null;
   private selectedRepository: Repository | null = null;
   private path = "";
+  private pickerGeneration = 0;
   private busy = false;
   private status = "Connect GitHub to open a Mermaid file from a repository.";
   private error = "";
@@ -142,6 +144,7 @@ export class GitHubSourcePicker {
   }
 
   private close(): void {
+    this.pickerGeneration += 1;
     if (this.dialog.open) this.dialog.close();
   }
 
@@ -149,7 +152,7 @@ export class GitHubSourcePicker {
     const target = event.target;
     if (!(target instanceof Element)) return;
     const action = target.closest<HTMLElement>("[data-github-action]")?.dataset.githubAction;
-    if (!action || (this.busy && action !== "close")) return;
+    if (this.busy && action !== "close") return;
 
     if (action === "close") return this.close();
     if (action === "connect") return void this.connect();
@@ -281,6 +284,8 @@ export class GitHubSourcePicker {
       this.selectedRepository = null;
       this.repositories = [];
       this.entries = [];
+      this.markdownBlocks = [];
+      this.pendingFile = null;
       this.status = this.installations.length
         ? "Choose a GitHub App installation."
         : "No accessible installation was found. Install the app, then refresh.";
@@ -332,8 +337,10 @@ export class GitHubSourcePicker {
     const installation = this.selectedInstallation;
     const repository = this.selectedRepository;
     if (!installation || !repository) return;
+    const pickerGeneration = this.pickerGeneration;
     await this.runBusy(`Opening ${path}…`, async () => {
       const file = await this.request<FileResponse>(this.contentsEndpoint(installation.id, repository.id, path));
+      if (pickerGeneration !== this.pickerGeneration || !this.dialog.open) return;
       if (file.kind !== "file") throw new Error("GitHub returned a directory where a file was expected.");
       if (/\.md$/iu.test(file.path)) {
         this.markdownBlocks = extractMermaidMarkdownBlocks(file.source);
@@ -403,7 +410,7 @@ export class GitHubSourcePicker {
       let problem: BrokerProblem = {};
       try { problem = await response.json() as BrokerProblem; } catch { /* non-JSON upstream error */ }
       const error = new Error(problem.detail || problem.title || `GitHub request failed (${response.status}).`);
-      Object.assign(error, { code: problem.code, status: response.status });
+      Object.assign(error, { code: problem.code, resetAt: problem.reset_at, status: response.status });
       throw error;
     }
     if (response.status === 204) return undefined as T;
@@ -424,19 +431,27 @@ export class GitHubSourcePicker {
       if (code === "SESSION_EXPIRED" || code === "SESSION_REQUIRED") {
         this.clearSession();
         this.error = "Your GitHub session expired. Connect again to continue.";
-      } else if (
-        code === "INSTALLATION_NOT_ACCESSIBLE" || code === "INSTALLATION_SUSPENDED" ||
-        code === "INVALID_INSTALLATION"
-      ) {
+      } else if (code === "INSTALLATION_REVOKED" || code === "INVALID_INSTALLATION") {
         this.selectedInstallation = null;
         this.selectedRepository = null;
         this.error = "This installation is no longer available. Refresh or reinstall the GitHub App.";
-      } else if (code === "REPOSITORY_NOT_ACCESSIBLE" || code === "REPOSITORY_ACCESS_CHANGED") {
+      } else if (code === "INSUFFICIENT_PERMISSION") {
+        this.selectedInstallation = null;
+        this.selectedRepository = null;
+        this.repositories = [];
+        this.entries = [];
+        this.error = "The GitHub App needs read-only Contents permission. Approve the permission update and reconnect.";
+      } else if (code === "REPOSITORY_NOT_AVAILABLE" || code === "REPOSITORY_ACCESS_CHANGED") {
         this.selectedRepository = null;
         this.entries = [];
         this.error = "Repository access changed. Choose the repository again or update the App installation.";
       } else if (code === "GITHUB_RATE_LIMITED") {
-        this.error = "GitHub's rate limit was reached. Wait a moment and try again.";
+        const resetAt = typeof error === "object" && error && "resetAt" in error
+          ? String((error as { resetAt?: unknown }).resetAt ?? "")
+          : "";
+        this.error = resetAt
+          ? `GitHub's rate limit was reached. Try again after ${new Date(resetAt).toLocaleTimeString()}.`
+          : "GitHub's rate limit was reached. Wait a moment and try again.";
       } else if (code === "GITHUB_UNAVAILABLE") {
         this.error = "GitHub is temporarily unavailable. Your local diagram is unchanged.";
       } else {
@@ -457,6 +472,8 @@ export class GitHubSourcePicker {
     this.selectedInstallation = null;
     this.selectedRepository = null;
     this.path = "";
+    this.markdownBlocks = [];
+    this.pendingFile = null;
   }
 
   private render(): void {

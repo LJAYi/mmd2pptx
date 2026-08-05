@@ -436,7 +436,7 @@ new GitHubSourcePicker({
   dialog: elements.githubPicker,
   onOpenSource: (source, provenance) => {
     if (
-      sourceDirty && elements.source.value.trim() &&
+      sourceDirty &&
       !window.confirm("Replace the Mermaid source you are currently editing?")
     ) return false;
     layoutEditor.loadPersistedForNextSource();
@@ -935,6 +935,9 @@ async function importMermaidFile(): Promise<void> {
   elements.sourceFile.value = "";
   if (!file) return;
   if (file.size > MAX_MERMAID_FILE_BYTES) {
+    window.clearTimeout(debounceTimer);
+    renderSequence += 1;
+    inspectionSequence += 1;
     lastState = {
       diagnostics: [{
         code: "MERMAID_FILE_TOO_LARGE",

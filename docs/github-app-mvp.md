@@ -341,6 +341,8 @@ safe user-facing detail, and request ID. At minimum, the UI distinguishes:
 - `UNSUPPORTED_FILE`, `FILE_TOO_LARGE`, `DIAGRAM_TOO_COMPLEX`, and
   `INVALID_UTF8`;
 - `INVALID_CURSOR`, `COLLECTION_TOO_LARGE`, and `DIRECTORY_TOO_LARGE`;
+- `GITHUB_REQUEST_BUDGET_EXCEEDED` when a source would require too many GitHub
+  API calls;
 - `GITHUB_RATE_LIMITED` with a reset timestamp;
 - `GITHUB_UNAVAILABLE` and `BROKER_UNAVAILABLE`.
 
